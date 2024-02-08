@@ -1,0 +1,9 @@
+use std::println;
+
+
+
+fn main() {
+    let x = 3 * 4;
+
+    println("Hello world!");
+}
