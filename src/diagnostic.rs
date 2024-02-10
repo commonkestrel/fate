@@ -1,7 +1,7 @@
-use std::sync::Arc;
 use crate::build::Span;
+use std::sync::Arc;
 
-#[derive(Debug,  Clone)]
+#[derive(Debug, Clone)]
 pub struct Diagnostic {
     message: String,
     span: Option<Arc<Span>>,

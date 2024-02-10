@@ -1,6 +1,4 @@
 use clap::Args;
 
 #[derive(Debug, Args)]
-pub struct LspArgs {
-
-}
+pub struct LspArgs {}

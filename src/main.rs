@@ -1,13 +1,13 @@
 use clap::{Parser, Subcommand};
 
 mod build;
+mod diagnostic;
 mod lsp;
 mod new;
-mod diagnostic;
 
 use build::BuildArgs;
-use new::NewArgs;
 use lsp::LspArgs;
+use new::NewArgs;
 
 #[derive(Debug, Parser)]
 #[clap(name = "fate", version)]
@@ -20,9 +20,7 @@ struct Args {
 enum Command {
     Build(BuildArgs),
     New(NewArgs),
-    Lsp(LspArgs)
+    Lsp(LspArgs),
 }
 
-fn main() {
-    
-}
+fn main() {}
