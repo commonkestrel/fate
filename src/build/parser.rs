@@ -7,27 +7,33 @@ use std::{
 use async_std::path::PathBuf;
 use indexmap::IndexMap;
 
-use super::lexer::{self, SingleSpan, TokenStream};
+use crate::{diagnostic::Diagnostic, span::Span};
 
-pub fn parse(stream: TokenStream) {}
+use super::lexer::{self, Token, TokenStream};
 
-#[derive(Debug, Clone)]
-pub struct Span {
-    source_name: Arc<String>,
-    source: lexer::Source,
-    lines: RangeInclusive<usize>,
-    columns: Range<usize>,
+pub fn parse<L>(stream: TokenStream) {}
+
+pub struct Cursor {
+    stream: TokenStream,
+    position: usize,
 }
 
-impl From<SingleSpan> for Span {
-    fn from(value: SingleSpan) -> Self {
-        Span {
-            source_name: value.source_name,
-            source: value.source,
-            columns: value.columns,
-            lines: value.line..=value.line,
-        }
+impl Iterator for Cursor {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ret = self.stream.get(self.position);
+        self.position += 1;
+        ret.cloned()
     }
+}
+
+pub trait Parsable: Sized {
+    /// Parses the item from a stream of raw tokens.
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic>;
+    /// Static description of the item.
+    /// Used for error messages.
+    fn description(&self) -> &'static str;
 }
 
 struct Namespace {
@@ -60,11 +66,7 @@ impl Size for lexer::Primitive {
 struct Variable {
     name: String,
     ty: Type,
-}
-
-enum Mutability {
-    Const,
-    Mut,
+    mutability: Mutability,
 }
 
 enum Type {
@@ -96,6 +98,11 @@ impl Size for Type {
             Type::Enum(en) => en.size(),
         }
     }
+}
+
+enum Mutability {
+    Const,
+    Mut,
 }
 
 struct Struct {
