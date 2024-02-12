@@ -35,6 +35,14 @@ impl TryFrom<String> for AsciiStr {
 
 impl std::fmt::Debug for AsciiStr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\"{}\"", unsafe {
+            std::str::from_utf8_unchecked(&self.inner)
+        })
+    }
+}
+
+impl fmt::Display for AsciiStr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", unsafe {
             std::str::from_utf8_unchecked(&self.inner)
         })
@@ -53,13 +61,7 @@ impl PartialEq<&str> for AsciiStr {
     }
 }
 
-impl fmt::Display for AsciiStr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", unsafe {
-            std::str::from_utf8_unchecked(&self.inner)
-        })
-    }
-}
+
 
 impl std::ops::Deref for AsciiStr {
     type Target = [u8];
@@ -155,7 +157,7 @@ mod tests {
     fn hello() {
         let test_str = "hello world!";
         let ascii = unescape_str(test_str).unwrap();
-        assert_eq!(ascii, "hello world!");
+        assert_eq!(ascii, "hello world!\0");
     }
 
     #[test]
