@@ -1,19 +1,14 @@
-use std::{
-    io::ErrorKind,
-    ops::{Range, RangeInclusive},
-    path::Path,
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use crate::{
     diagnostic::Diagnostic,
     error,
     span::{Lookup, Span},
 };
+
 use async_std::{
     fs::File,
     io::{prelude::*, BufReader},
-    stream::StreamExt,
 };
 use logos::{Lexer, Logos};
 

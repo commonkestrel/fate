@@ -7,7 +7,7 @@ use std::{
 use async_std::path::PathBuf;
 use indexmap::IndexMap;
 
-use crate::{diagnostic::Diagnostic, span::Span};
+use crate::diagnostic::Diagnostic;
 
 use super::lexer::{self, Token, TokenStream};
 
