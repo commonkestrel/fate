@@ -1,3 +1,4 @@
+use super::ascii::AsciiStr;
 use super::parser::{Parsable, Cursor};
 use super::lexer::{Delimeter, Keyword, Punctuation, Token, TokenInner};
 use crate::diagnostic::Diagnostic;
@@ -33,7 +34,7 @@ macro_rules! parsable {
             pub struct $name {
                 pub span: Span,
                 $(
-                    $vis $field: $ty,
+                    $v $field: $ty,
                 )*
             }
 
@@ -89,6 +90,7 @@ parsable! {
     ":"  : Punctuation(Punctuation::Colon) => Colon,
 }
 
+// Keywords
 parsable! {
     "`use`" : Keyword(Keyword::Use) => Use,
     "`fn`" : Keyword(Keyword::Fn) => Fn,
@@ -111,4 +113,10 @@ parsable! {
     "`namespace`" : Keyword(Keyword::Namespace) => Namespace,
     "`lowerself`" : Keyword(Keyword::LowerSelf) => LowerSelf,
     "`upperself`" : Keyword(Keyword::UpperSelf) => UpperSelf,
+}
+
+parsable! {
+    "integer" : Immediate(value) => Immediate { pub value: i64 },
+    "string" : String(value) => StringLit { pub value: AsciiStr },
+    "identifier" : Ident(name) => Ident { pub name: String },
 }
