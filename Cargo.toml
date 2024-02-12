@@ -6,9 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-std = "1.12.0"
+async-std = { version = "1.12.0", features = ["attributes"] }
 clap = { version = "4.4.18", features = ["derive"] }
+colored = "2.1.0"
 indexmap = "2.2.2"
 lazy-regex = "3.1.0"
 logos = "0.14.0"
+semver = { version = "1.0.21", features = ["serde"] }
+serde = { version = "1.0.196", features = ["derive"] }
 thiserror = "1.0.56"
+toml = "0.8.10"
+tower-lsp = { version = "0.20.0", default-features = false, features = ["runtime-agnostic"] }
