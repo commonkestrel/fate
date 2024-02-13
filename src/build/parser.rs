@@ -9,7 +9,7 @@ use indexmap::IndexMap;
 
 use crate::diagnostic::Diagnostic;
 
-use super::lexer::{self, Token, TokenStream};
+use super::{lexer::{self, Token, TokenStream}, token::{Eq, Ident}};
 
 pub fn parse<L>(stream: TokenStream) {}
 
@@ -43,6 +43,28 @@ struct Namespace {
 
 struct FnDefinition {
     args: Vec<Variable>,
+    body: FnTree,
+}
+enum FnTree {
+    Body(Vec<FnTree>),
+    Instruction(Instruction),
+    Initialization {
+        mutability: Mutability,
+        name: Ident,
+        eq: Eq,
+        expr: Expr,
+    },
+    Assignment {
+
+    },
+}
+
+enum Instruction {
+
+}
+
+struct Expr {
+    
 }
 
 trait Size {
