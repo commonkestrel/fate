@@ -151,6 +151,7 @@ pub enum TokenInner {
     #[token("u16", |_| Primitive::U16)]
     #[token("i8", |_| Primitive::I8)]
     #[token("i16", |_| Primitive::I16)]
+    #[token("str", |_| Primitive::Str)]
     Primitive(Primitive),
 
     #[token("true", |_| true)]
@@ -183,6 +184,7 @@ impl TokenInner {
             TI::Immediate(_) => "integer",
             TI::String(_) => "string",
             TI::Ident(_) => "identifier",
+            TI::Str(_) => "string",
             TI::Delimeter(del) => del.description(),
             TI::Keyword(key) => key.description(),
             TI::Punctuation(punc) => punc.description(),
@@ -330,6 +332,7 @@ pub enum Primitive {
     U16,
     I8,
     I16,
+    Str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
