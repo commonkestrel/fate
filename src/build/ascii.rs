@@ -61,8 +61,6 @@ impl PartialEq<&str> for AsciiStr {
     }
 }
 
-
-
 impl std::ops::Deref for AsciiStr {
     type Target = [u8];
 

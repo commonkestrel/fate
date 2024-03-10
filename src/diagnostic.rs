@@ -82,10 +82,14 @@ impl Diagnostic {
 
     async fn emit_fancy(self) {
         let message = self.format_message();
-        writeln!(async_std::io::stdout(), "{message}").await.unwrap();
+        writeln!(async_std::io::stdout(), "{message}")
+            .await
+            .unwrap();
         if let Some(span) = self.span {
             let pointer = span.pointer(self.level.color());
-            writeln!(async_std::io::stdout(), "{pointer}").await.unwrap();
+            writeln!(async_std::io::stdout(), "{pointer}")
+                .await
+                .unwrap();
         }
     }
 }
