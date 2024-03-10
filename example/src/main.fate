@@ -1,3 +1,36 @@
+use std::alloc;
+
 fn main() {
+    let string = "hello world";
+}
+
+struct String {
+    ptr: *mut u8,
+    capactity: u16,
+    len: u16,
+}
+
+struct StringRef {
     
+}
+
+impl String {
+    pub fn new() -> String {
+        // Alloc a single slot for 
+        let ptr = alloc::malloc(1);
+        String {
+            ptr = ptr,
+            capacity = 1,
+            len = 0,
+        }
+    }
+
+    pub fn from(s: str) -> String {
+        let ptr = alloc::malloc(s.len());
+        String {
+            ptr = ptr,
+            capacity = s.len(),
+            
+        }
+    }
 }

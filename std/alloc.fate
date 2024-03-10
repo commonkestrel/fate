@@ -1,0 +1,7 @@
+pub fn malloc(size: u16): *mut u8 {
+    todo!()
+}
+
+pub fn free(ptr: *mut u8): void {
+    todo!()
+}

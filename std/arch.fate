@@ -1,4 +1,4 @@
-pub fn print(message: *u8, len: u16) {
+pub fn print(message: *u8, len: u16): void {
 
 }
 
