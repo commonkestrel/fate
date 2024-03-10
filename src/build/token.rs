@@ -1,23 +1,23 @@
 use super::ascii::AsciiStr;
-use super::parser::{Parsable, Cursor};
-use super::lexer::{Delimeter, Keyword, Punctuation, Token, TokenInner};
+use super::lexer::{Delimeter, Keyword, Punctuation, TokenInner};
+use super::symbol_table::SymbolRef;
+use super::syntax::{Cursor, Parsable};
 use crate::diagnostic::Diagnostic;
-use crate::span::Span;
+use crate::span::Spanned;
 use crate::{error, spanned_error};
 
 macro_rules! parsable {
     ($($description:literal: $token:ident($inner:pat) => $name:ident),* $(,)?) => {
         $(
             #[derive(Debug, Clone, PartialEq)]
-            pub struct $name {
-                pub span: Span,
-            }
+            pub struct $name;
 
-            impl Parsable for $name {
+            impl Parsable for Spanned<$name> {
                 fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
-                    match cursor.next() {
-                        Some(Token { inner: TokenInner::$token($inner), span }) => Ok(Self { span }),
-                        Some(tok) => Err(spanned_error!(tok.span, concat!("expected ", $description, ", found {}"), tok.inner.description())),
+                    let next = cursor.next().map(Spanned::deconstruct);
+                    match next {
+                        Some((TokenInner::$token($inner), span)) => Ok(Spanned::new($name, span)),
+                        Some((tok, span)) => Err(spanned_error!(span, concat!("expected ", $description, ", found {}"), tok.description())),
                         None => Err(error!(concat!("expected ", $description, ", found EOF"),))
                     }
                 }
@@ -32,17 +32,17 @@ macro_rules! parsable {
         $(
             #[derive(Debug, Clone, PartialEq)]
             pub struct $name {
-                pub span: Span,
                 $(
                     $v $field: $ty,
                 )*
             }
 
-            impl Parsable for $name {
+            impl Parsable for Spanned<$name> {
                 fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
-                    match cursor.next() {
-                        Some(Token { inner: TokenInner::$token($inner), span }) => Ok(Self { span, $($field)* }),
-                        Some(tok) => Err(spanned_error!(tok.span, concat!("expected ", $description, ", found {}"), tok.inner.description())),
+                    let next = cursor.next().map(Spanned::deconstruct);
+                    match next {
+                        Some((TokenInner::$token($inner), span)) => Ok(Spanned::new($name { $($field)* }, span)),
+                        Some((tok, span)) => Err(spanned_error!(span, concat!("expected ", $description, ", found {}"), tok.description())),
                         None => Err(error!(concat!("expected ", $description, ", found EOF"),))
                     }
                 }
@@ -55,17 +55,21 @@ macro_rules! parsable {
     };
 }
 
-// Delimeters
+//------ Delimeters ------//
+
 parsable! {
-    "`(`" : Delimeter(Delimeter::OpeningParen) => OpeningParen,
-    "`)`"  : Delimeter(Delimeter::ClosingParen) => ClosedParen,
-    "`[`"  : Delimeter(Delimeter::OpeningBracket) => OpenBracket,
-    "`]`"  : Delimeter(Delimeter::ClosingBracket) => ClosedBracket,
-    "`{{`" : Delimeter(Delimeter::OpeningBrace) => OpenBrace,
-    "`}}`" : Delimeter(Delimeter::ClosingBrace) => ClosedBrace,
+    "`(`" : Delimeter(Delimeter::OpenParen) => OpenParen,
+    "`)`"  : Delimeter(Delimeter::CloseParen) => CloseParen,
+    "`[`"  : Delimeter(Delimeter::OpenBracket) => OpenBracket,
+    "`]`"  : Delimeter(Delimeter::CloseBracket) => CloseBracket,
+    "`{{`" : Delimeter(Delimeter::OpenBrace) => OpenBrace,
+    "`}}`" : Delimeter(Delimeter::CloseBrace) => CloseBrace,
 }
 
-// Punctuation
+//------ Punctuation ------//
+
+
+
 parsable! {
     "="  : Punctuation(Punctuation::Eq) => Eq,
     "==" : Punctuation(Punctuation::EqEq) => EqEq,
@@ -84,13 +88,21 @@ parsable! {
     "-"  : Punctuation(Punctuation::Minus) => Minus,
     "/"  : Punctuation(Punctuation::Slash) => Slash,
     "*"  : Punctuation(Punctuation::Star) => Star,
+    "+=" : Punctuation(Punctuation::PlusEq) => PlusEq,
+    "-=" : Punctuation(Punctuation::MinusEq) => MinusEq,
+    "*=" : Punctuation(Punctuation::MulEq) => MulEq,
+    "/=" : Punctuation(Punctuation::DivEq) => DivEq,
     "<<" : Punctuation(Punctuation::Shl) => Shl,
     ">>" : Punctuation(Punctuation::Shr) => Shr,
     ","  : Punctuation(Punctuation::Comma) => Comma,
+    ";"  : Punctuation(Punctuation::Semicolon) => Semicolon,
     ":"  : Punctuation(Punctuation::Colon) => Colon,
+    "::" : Punctuation(Punctuation::DoubleColon) => DoubleColon,
+    "?"  : Punctuation(Punctuation::Question) => Question,
 }
 
-// Keywords
+//------ Keywords ------//
+
 parsable! {
     "`use`" : Keyword(Keyword::Use) => Use,
     "`fn`" : Keyword(Keyword::Fn) => Fn,
@@ -115,8 +127,10 @@ parsable! {
     "`upperself`" : Keyword(Keyword::UpperSelf) => UpperSelf,
 }
 
+//------ Containers ------//
+
 parsable! {
     "integer" : Immediate(value) => Immediate { pub value: i64 },
     "string" : String(value) => StringLit { pub value: AsciiStr },
-    "identifier" : Ident(name) => Ident { pub name: String },
+    "identifier" : Ident(position) => Ident { pub position: SymbolRef },
 }

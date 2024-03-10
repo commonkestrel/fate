@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{
     diagnostic::Diagnostic,
     error,
-    span::{Lookup, Span},
+    span::{Lookup, Span, Spanned},
 };
 
 use async_std::{
@@ -12,11 +12,15 @@ use async_std::{
 };
 use logos::{Lexer, Logos};
 
-use super::{ascii::{unescape_str, AsciiStr, UnescapeError}, parser::Parsable};
+use super::{
+    ascii::{unescape_str, AsciiStr, UnescapeError},
+    symbol_table::{SymbolRef, SymbolTable},
+    syntax::Parsable,
+};
 
 const TAB_SPACING: &str = "    ";
 
-pub type TokenStream = Vec<Token>;
+pub type TokenStream = Vec<Spanned<TokenInner>>;
 pub type Errors = Vec<Diagnostic>;
 
 pub async fn lex(source: String, content: File) -> Result<TokenStream, Errors> {
@@ -41,10 +45,7 @@ pub async fn lex(source: String, content: File) -> Result<TokenStream, Errors> {
 
         match tok {
             Ok(tok) => {
-                let token = Token {
-                    inner: tok,
-                    span: s,
-                };
+                let token = Spanned::new(tok, s);
                 tokens.push(token);
             }
             Err(mut err) => {
@@ -66,24 +67,19 @@ pub fn lex_string(content: &str, source: &str) -> Result<TokenStream, Errors> {
     todo!()
 }
 
-#[derive(Debug, Clone)]
-pub struct Token {
-    pub inner: TokenInner,
-    pub span: Span,
-}
-
-impl Parsable for Token {
-    fn parse(cursor: &mut super::parser::Cursor) -> Result<Self, Diagnostic> {
+impl Parsable for Spanned<TokenInner> {
+    fn parse(cursor: &mut super::syntax::Cursor) -> Result<Self, Diagnostic> {
         cursor.next().ok_or_else(|| error!(""))
     }
-    
+
     fn description(&self) -> &'static str {
-        self.inner.description()
+        self.description()
     }
 }
 
 #[derive(Logos, Debug, Clone, PartialEq)]
 #[logos(error = Diagnostic)]
+#[logos(extras = SymbolTable)]
 #[logos(skip r"[ \t\f\n\r]")]
 pub enum TokenInner {
     #[token("use", |_| Keyword::Use)]
@@ -109,12 +105,12 @@ pub enum TokenInner {
     #[token("Self", |_| Keyword::UpperSelf)]
     Keyword(Keyword),
 
-    #[token("(", |_| Delimeter::OpeningParen)]
-    #[token(")", |_| Delimeter::ClosingParen)]
-    #[token("[", |_| Delimeter::OpeningBrace)]
-    #[token("]", |_| Delimeter::ClosingBrace)]
-    #[token("{", |_| Delimeter::OpeningBracket)]
-    #[token("}", |_| Delimeter::ClosingBracket)]
+    #[token("(", |_| Delimeter::OpenParen)]
+    #[token(")", |_| Delimeter::CloseParen)]
+    #[token("[", |_| Delimeter::OpenBrace)]
+    #[token("]", |_| Delimeter::CloseBrace)]
+    #[token("{", |_| Delimeter::OpenBracket)]
+    #[token("}", |_| Delimeter::CloseBracket)]
     Delimeter(Delimeter),
 
     #[token("+", |_| Punctuation::Plus)]
@@ -129,6 +125,10 @@ pub enum TokenInner {
     #[token("<=", |_| Punctuation::Le)]
     #[token(">", |_| Punctuation::Gt)]
     #[token(">=", |_| Punctuation::Ge)]
+    #[token("+=", |_| Punctuation::PlusEq)]
+    #[token("-=", |_| Punctuation::MinusEq)]
+    #[token("*=", |_| Punctuation::MulEq)]
+    #[token("/=", |_| Punctuation::DivEq)]
     #[token("=", |_| Punctuation::Eq)]
     #[token("==", |_| Punctuation::EqEq)]
     #[token("!=", |_| Punctuation::NotEqual)]
@@ -143,14 +143,19 @@ pub enum TokenInner {
     #[token(".", |_| Punctuation::Dot)]
     #[token("->", |_| Punctuation::Arrow)]
     #[token("=>", |_| Punctuation::FatArrow)]
+    #[token("?", |_| Punctuation::Question)]
     Punctuation(Punctuation),
 
     #[token("void", |_| Primitive::Void)]
     #[token("bool", |_| Primitive::Bool)]
     #[token("u8", |_| Primitive::U8)]
     #[token("u16", |_| Primitive::U16)]
+    #[token("u24", |_| Primitive::U24)]
+    #[token("u32", |_| Primitive::U32)]
     #[token("i8", |_| Primitive::I8)]
     #[token("i16", |_| Primitive::I16)]
+    #[token("i24", |_| Primitive::I24)]
+    #[token("i32", |_| Primitive::I32)]
     #[token("str", |_| Primitive::Str)]
     Primitive(Primitive),
 
@@ -171,8 +176,8 @@ pub enum TokenInner {
     #[regex(r##"r#"((\\")|[\x00-\x21\x23-\x7F])*"#"##, TokenInner::raw_string)]
     String(AsciiStr),
 
-    #[regex(r"[_a-zA-Z][_a-zA-Z0-9]*", |lex| lex.slice().to_owned())]
-    Ident(String),
+    #[regex(r"[_a-zA-Z][_a-zA-Z0-9]*", TokenInner::ident)]
+    Ident(SymbolRef),
 }
 
 impl TokenInner {
@@ -184,7 +189,6 @@ impl TokenInner {
             TI::Immediate(_) => "integer",
             TI::String(_) => "string",
             TI::Ident(_) => "identifier",
-            TI::Str(_) => "string",
             TI::Delimeter(del) => del.description(),
             TI::Keyword(key) => key.description(),
             TI::Punctuation(punc) => punc.description(),
@@ -269,6 +273,10 @@ impl TokenInner {
             })
         })?)
     }
+
+    fn ident(lex: &mut Lexer<TokenInner>) -> SymbolRef {
+        lex.extras.get_or_insert(lex.slice())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -330,8 +338,12 @@ pub enum Primitive {
     Bool,
     U8,
     U16,
+    U24,
+    U32,
     I8,
     I16,
+    I24,
+    I32,
     Str,
 }
 
@@ -363,6 +375,14 @@ pub enum Punctuation {
     Ge,
     /// `=`
     Eq,
+    /// `+=`
+    PlusEq,
+    /// `-=`
+    MinusEq,
+    /// `*=`
+    MulEq,
+    /// `/=`
+    DivEq,
     /// `==`
     EqEq,
     /// `!=`
@@ -389,6 +409,8 @@ pub enum Punctuation {
     Arrow,
     /// `=>`
     FatArrow,
+    /// `?`
+    Question,
 }
 
 impl Punctuation {
@@ -407,6 +429,10 @@ impl Punctuation {
             Punctuation::Gt => "`>`",
             Punctuation::Ge => "`>=`",
             Punctuation::Eq => "`=`",
+            Punctuation::PlusEq => "`+=`",
+            Punctuation::MinusEq => "`-=`",
+            Punctuation::MulEq => "`*=`",
+            Punctuation::DivEq => "`/=`",
             Punctuation::EqEq => "`==`",
             Punctuation::NotEqual => "`!=`",
             Punctuation::And => "`&`",
@@ -420,7 +446,7 @@ impl Punctuation {
             Punctuation::Dot => "`.`",
             Punctuation::Arrow => "`->`",
             Punctuation::FatArrow => "`=>`",
-
+            Punctuation::Question => "`?`",
         }
     }
 }
@@ -428,28 +454,28 @@ impl Punctuation {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Delimeter {
     /// `(`
-    OpeningParen,
+    OpenParen,
     /// `)`
-    ClosingParen,
+    CloseParen,
     /// `[`
-    OpeningBracket,
+    OpenBracket,
     /// `]`
-    ClosingBracket,
+    CloseBracket,
     /// `{`
-    OpeningBrace,
+    OpenBrace,
     /// `}`
-    ClosingBrace,
+    CloseBrace,
 }
 
 impl Delimeter {
     fn description(&self) -> &'static str {
         match self {
-            Delimeter::OpeningParen => "`(`",
-            Delimeter::ClosingParen => "`)`",
-            Delimeter::OpeningBracket => "`[`",
-            Delimeter::ClosingBracket => "`]`",
-            Delimeter::OpeningBrace => "`{`",
-            Delimeter::ClosingBrace => "`}`",
+            Delimeter::OpenParen => "`(`",
+            Delimeter::CloseParen => "`)`",
+            Delimeter::OpenBracket => "`[`",
+            Delimeter::CloseBracket => "`]`",
+            Delimeter::OpenBrace => "`{`",
+            Delimeter::CloseBrace => "`}`",
         }
     }
 }

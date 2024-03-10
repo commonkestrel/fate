@@ -1,9 +1,79 @@
-use std::{
-    ops::Range,
-    sync::Arc,
-};
+use std::{borrow, ops::{self, Range}, sync::Arc};
 
 use colored::{Color, Colorize};
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct Spanned<T> {
+    inner: T,
+    span: Span,
+}
+
+impl<T> Spanned<T> {
+    #[inline]
+    pub fn new(value: T, span: Span) -> Spanned<T> {
+        Spanned { inner: value, span }
+    }
+
+    #[inline]
+    pub fn inner(&self) -> &T {
+        &self.inner
+    }
+
+    #[inline]
+    pub fn inner_mut(&mut self) -> &mut T {
+        &mut self.inner
+    }
+
+    #[inline]
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
+
+    #[inline]
+    pub fn span(&self) -> &Span {
+        &self.span
+    }
+
+    #[inline]
+    pub fn into_span(self) -> Span {
+        self.span
+    }
+
+    #[inline]
+    pub fn deconstruct(self) -> (T, Span) {
+        (self.inner, self.span)
+    }
+}
+
+impl<T> ops::Deref for Spanned<T> {
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.inner()
+    }
+}
+
+impl<T> ops::DerefMut for Spanned<T> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner_mut()
+    }
+}
+
+impl<T> borrow::Borrow<T> for Spanned<T> {
+    #[inline]
+    fn borrow(&self) -> &T {
+        self.inner()
+    }
+}
+
+impl<T> borrow::BorrowMut<T> for Spanned<T> {
+    #[inline]
+    fn borrow_mut(&mut self) -> &mut T {
+        self.inner_mut()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Span {
@@ -46,7 +116,7 @@ impl Span {
             todo!()
         } else {
             let line = self.lookup.line(lines.start).trim_end();
-            let offset = (lines.start+1).ilog10() as usize + 2;
+            let offset = (lines.start + 1).ilog10() as usize + 2;
 
             format!(
                 "\
@@ -66,7 +136,8 @@ impl Span {
                     blank = "",
                     start = col_n - 1,
                     length = self.location.end - self.location.start,
-                ).color(arrow_color),
+                )
+                .color(arrow_color),
             )
         }
     }
