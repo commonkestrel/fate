@@ -1,15 +1,21 @@
-use crate::cfg::{Config, ConfigError, ProjectType};
+use crate::{
+    build::lexer::TokenInner,
+    cfg::{Config, ConfigError, ProjectType},
+};
 use async_std::fs::File;
 use clap::Args;
 use std::path::PathBuf;
 use thiserror::Error;
 
 mod ascii;
-mod expr;
+mod deps;
+mod ast;
 mod generator;
 pub mod lexer;
+mod symbol_table;
+mod syntax;
 pub mod token;
-mod parser;
+mod type_resolution;
 
 const SOURCE: &str = "src";
 
@@ -62,7 +68,13 @@ pub async fn build(args: BuildArgs) -> Result<(), BuildError> {
     };
 
     if cfg!(debug_assertions) {
-        println!("{root_stream:#?}")
+        println!(
+            "{:#?}",
+            root_stream
+                .into_iter()
+                .map(|tok| tok.into_inner())
+                .collect::<Vec<TokenInner>>()
+        );
     }
 
     Ok(())
