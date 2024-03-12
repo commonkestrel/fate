@@ -6,6 +6,56 @@ use crate::diagnostic::Diagnostic;
 use crate::span::Spanned;
 use crate::{error, spanned_error};
 
+#[macro_export]
+macro_rules! Token {
+    [=] => {$crate::build::syntax::token::Eq};
+    [==] => {$crate::build::syntax::token::EqEq};
+    [!=] => {$crate::build::syntax::token::Ne};
+    [<] => {$crate::build::syntax::token::Lt};
+    [<=] => {$crate::build::syntax::token::Le};
+    [>] => {$crate::build::syntax::token::Gt};
+    [>=] => {$crate::build::syntax::token::Ge};
+    [&] => {$crate::build::syntax::token::And};
+    [&&] => {$crate::build::syntax::token::AndAnd};
+    [|] => {$crate::build::syntax::token::Or};
+    [||] => {$crate::build::syntax::token::OrOr};
+    [^] => {$crate::build::syntax::token::Caret};
+    [!] => {$crate::build::syntax::token::Not};
+    [~] => {$crate::build::syntax::token::Not};
+    [+] => {$crate::build::syntax::token::Plus};
+    [-] => {$crate::build::syntax::token::Minus};
+    [/] => {$crate::build::syntax::token::Slash};
+    [*] => {$crate::build::syntax::token::Star};
+    [<<] => {$crate::build::syntax::token::Shl};
+    [>>] => {$crate::build::syntax::token::Shr};
+    [,] => {$crate::build::syntax::token::Comma};
+    [:] => {$crate::build::syntax::token::Colon};
+    [if] => {$crate::build::syntax::token::If};
+    [else] => {$crate::build::syntax::token::Else};
+    [use] => {$crate::build::syntax::token::Use};
+    [fn] => {$crate::build::syntax::token::Fn};
+    [return] => {$crate::build::syntax::token::Return};
+    [struct] => {$crate::build::syntax::token::Struct};
+    [enum] => {$crate::build::syntax::token::Enum};
+    [union] => {$crate::build::syntax::token::Union};
+    [impl] => {$crate::build::syntax::token::Elif};
+    [pub] => {$crate::build::syntax::token::Else};
+    [const] => {$crate::build::syntax::token::EndIf};
+    [static] => {$crate::build::syntax::token::Org};
+    [mut] => {$crate::build::syntax::token::Cseg};
+    [match] => {$crate::build::syntax::token::Dseg};
+    [for] => {$crate::build::syntax::token::Byte};
+    [while] => {$crate::build::syntax::token::Double};
+    [loop] => {$crate::build::syntax::token::Quad};
+    [break] => {$crate::build::syntax::token::Str};
+    [continue] => {$crate::build::syntax::token::Var};
+    [let] => {$crate::build::syntax::token::Error};
+    [namespace] => {$crate::build::syntax::token::Error};
+    [as] => {$crate::build::syntax::token::As};
+    [self] => {$crate::build::syntax::token::LowerSelf};
+    [Self] => {$crate::build::syntax::token::UpperSelf};
+}
+
 macro_rules! parsable {
     ($($description:literal: $token:ident($inner:pat) => $name:ident),* $(,)?) => {
         $(
@@ -101,10 +151,12 @@ parsable! {
     "-"  : Punctuation(Punctuation::Minus) => Minus,
     "/"  : Punctuation(Punctuation::Slash) => Slash,
     "*"  : Punctuation(Punctuation::Star) => Star,
+    "%"  : Punctuation(Punctuation::Percent) => Percent,
     "+=" : Punctuation(Punctuation::PlusEq) => PlusEq,
     "-=" : Punctuation(Punctuation::MinusEq) => MinusEq,
     "*=" : Punctuation(Punctuation::MulEq) => MulEq,
     "/=" : Punctuation(Punctuation::DivEq) => DivEq,
+    "%=" : Punctuation(Punctuation::ModEq) => ModEq,
     "<<" : Punctuation(Punctuation::Shl) => Shl,
     ">>" : Punctuation(Punctuation::Shr) => Shr,
     ","  : Punctuation(Punctuation::Comma) => Comma,
@@ -117,27 +169,30 @@ parsable! {
 //------ Keywords ------//
 
 parsable! {
-    "`use`" : Keyword(Keyword::Use) => Use,
-    "`fn`" : Keyword(Keyword::Fn) => Fn,
-    "`return`" : Keyword(Keyword::Return) => Return,
-    "`struct`" : Keyword(Keyword::Struct) => Struct,
-    "`enum`" : Keyword(Keyword::Enum) => Enum,
-    "`impl`" : Keyword(Keyword::Impl) => Impl,
-    "`pub`" : Keyword(Keyword::Pub) => Pub,
-    "`const`" : Keyword(Keyword::Const) => Const,
-    "`static`" : Keyword(Keyword::Static) => Static,
-    "`mut`" : Keyword(Keyword::Mut) => Mut,
-    "`if`" : Keyword(Keyword::If) => If,
-    "`else`" : Keyword(Keyword::Else) => Else,
-    "`match`" : Keyword(Keyword::Match) => Match,
-    "`for`" : Keyword(Keyword::For) => For,
-    "`while`" : Keyword(Keyword::While) => While,
-    "`break`" : Keyword(Keyword::Break) => Break,
-    "`continue`" : Keyword(Keyword::Continue) => Continue,
-    "`let`" : Keyword(Keyword::Let) => Let,
-    "`namespace`" : Keyword(Keyword::Namespace) => Namespace,
-    "`lowerself`" : Keyword(Keyword::LowerSelf) => LowerSelf,
-    "`upperself`" : Keyword(Keyword::UpperSelf) => UpperSelf,
+    "keyword `use`" : Keyword(Keyword::Use) => Use,
+    "keyword `fn`" : Keyword(Keyword::Fn) => Fn,
+    "keyword `return`" : Keyword(Keyword::Return) => Return,
+    "keyword `struct`" : Keyword(Keyword::Struct) => Struct,
+    "keyword `enum`" : Keyword(Keyword::Enum) => Enum,
+    "keyword `union`" : Keyword(Keyword::Union) => Union,
+    "keyword `impl`" : Keyword(Keyword::Impl) => Impl,
+    "keyword `pub`" : Keyword(Keyword::Pub) => Pub,
+    "keyword `const`" : Keyword(Keyword::Const) => Const,
+    "keyword `static`" : Keyword(Keyword::Static) => Static,
+    "keyword `mut`" : Keyword(Keyword::Mut) => Mut,
+    "keyword `if`" : Keyword(Keyword::If) => If,
+    "keyword `else`" : Keyword(Keyword::Else) => Else,
+    "keyword `match`" : Keyword(Keyword::Match) => Match,
+    "keyword `for`" : Keyword(Keyword::For) => For,
+    "keyword `while`" : Keyword(Keyword::While) => While,
+    "keyword `loop`" : Keyword(Keyword::Loop) => Loop,
+    "keyword `break`" : Keyword(Keyword::Break) => Break,
+    "keyword `continue`" : Keyword(Keyword::Continue) => Continue,
+    "keyword `let`" : Keyword(Keyword::Let) => Let,
+    "keyword `namespace`" : Keyword(Keyword::Namespace) => Namespace,
+    "keyword `as`" : Keyword(Keyword::As) => As,
+    "keyword `self`" : Keyword(Keyword::LowerSelf) => LowerSelf,
+    "keyword `Self`" : Keyword(Keyword::UpperSelf) => UpperSelf,
 }
 
 //------ Containers ------//

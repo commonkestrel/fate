@@ -102,6 +102,18 @@ impl Span {
         }
     }
 
+    pub fn end(&self) -> usize {
+        return self.location.end;
+    }
+
+    pub fn source_name(&self) -> Arc<String> {
+        self.source_name.clone()
+    }
+
+    pub fn lookup(&self) -> Arc<Lookup> {
+        self.lookup.clone()
+    }
+
     pub fn to(&self, other: &Span) -> Span {
         debug_assert_eq!(self.source_name, other.source_name);
         debug_assert_eq!(self.lookup, other.lookup);

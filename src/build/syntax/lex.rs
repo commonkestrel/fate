@@ -87,6 +87,7 @@ pub enum Token {
     #[token("return", |_| Keyword::Return)]
     #[token("struct", |_| Keyword::Struct)]
     #[token("enum", |_| Keyword::Enum)]
+    #[token("union", |_| Keyword::Union)]
     #[token("impl", |_| Keyword::Impl)]
     #[token("pub", |_| Keyword::Pub)]
     #[token("const", |_| Keyword::Const)]
@@ -292,6 +293,7 @@ pub enum Keyword {
     Return,
     Struct,
     Enum,
+    Union,
     Impl,
     Pub,
     Const,
@@ -320,6 +322,7 @@ impl Keyword {
             Keyword::Return => "keyword `return`",
             Keyword::Struct => "keyword `struct`",
             Keyword::Enum => "keyword `enum`",
+            Keyword::Union => "keyword `union`",
             Keyword::Impl => "keyword `impl`",
             Keyword::Pub => "keyword `pub`",
             Keyword::Const => "keyword `const`",
@@ -367,6 +370,8 @@ pub enum Punctuation {
     Star,
     /// `/`
     Slash,
+    /// `%`
+    Percent,
     /// `<<`
     Shl,
     /// `>>`
@@ -438,6 +443,7 @@ impl Punctuation {
             Punctuation::Minus => "`-`",
             Punctuation::Star => "`*`",
             Punctuation::Slash => "`/`",
+            Punctuation::Percent => "`%`",
             Punctuation::Shl => "`<<`",
             Punctuation::Shr => "`>>`",
             Punctuation::Not => "`!`",

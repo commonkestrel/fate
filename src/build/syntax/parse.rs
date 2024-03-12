@@ -1,15 +1,28 @@
 use std::{
-    collections::HashMap,
-    ops::{Deref, Range, RangeInclusive},
-    sync::Arc,
+    collections::HashMap, ops::{Deref, Range, RangeBounds, RangeInclusive}, slice::SliceIndex, sync::Arc
 };
 
 use async_std::path::PathBuf;
 use indexmap::IndexMap;
 
+pub fn parse_functions(mut stream: TokenStream, source_name: Arc<String>, lookup: Arc<Lookup>) -> Result<Vec<FnDefinition>, Diagnostic> {
+    let mut cursor = Cursor::new(&mut stream, source_name, lookup);
+    let mut functions = Vec::new();
+
+    while !cursor.at_end() {
+        if cursor.check(&Token::Keyword(Keyword::Fn)) {
+            functions.push(cursor.parse()?);
+        } else {
+            cursor.step();
+        }
+    }
+
+    Ok(functions)
+}
+
 use super::{
-    ast::Expr,
-    lex::{self, Delimeter, Punctuation, Token, TokenStream},
+    ast::{Expr, FnDefinition},
+    lex::{self, Delimeter, Keyword, Punctuation, Token, TokenStream},
     token::{
         Break, CloseBrace, CloseBracket, CloseParen, Comma, Continue, DoubleColon, Eq, For, Gt,
         Ident, Let, Lt, Mut, OpenBrace, OpenBracket, OpenParen, Return, Semicolon,
@@ -18,7 +31,7 @@ use super::{
 use crate::{
     diagnostic::Diagnostic,
     error,
-    span::{Span, Spanned},
+    span::{Lookup, Span, Spanned},
     spanned_error,
 };
 
@@ -27,14 +40,17 @@ pub fn parse<L>(stream: TokenStream) {}
 pub struct Cursor<'a> {
     stream: &'a mut [Spanned<Token>],
     position: usize,
+    eof_span: Span,
 }
 
 impl<'a> Cursor<'a> {
     #[inline]
-    pub fn new(stream: &'a mut [Spanned<Token>]) -> Self {
+    pub fn new(stream: &'a mut [Spanned<Token>], source_name: Arc<String>, lookup: Arc<Lookup>) -> Self {
+        let end_position = stream.last().map(|last| last.span().end()-1..last.span().end()).unwrap_or(0..1);
         Self {
             stream,
             position: 0,
+            eof_span: Span::new(source_name, lookup, end_position),
         }
     }
 
@@ -80,6 +96,19 @@ impl<'a> Cursor<'a> {
         if self.position != 0 {
             self.position -= 1;
         }
+    }
+
+    pub fn slice<R: Into<Range<usize>>>(&mut self, range: R) -> Cursor {
+        Cursor::new(
+            &mut self.stream[range.into()],
+            self.eof_span.source_name(),
+            self.eof_span.lookup(),
+        )
+    }
+
+    #[inline]
+    pub fn eof_span(&self) -> Span {
+        self.eof_span.clone()
     }
 }
 
@@ -138,9 +167,7 @@ macro_rules! delimeterized {
                                 return Ok(Spanned::new(
                                     $ident {
                                         open: open.into_inner(),
-                                        inner: T::parse(&mut Cursor::new(
-                                            &mut cursor.stream[start..i],
-                                        ))?,
+                                        inner: T::parse(&mut cursor.slice(start..i))?,
                                         close: close.into_inner(),
                                     },
                                     span,
@@ -181,9 +208,7 @@ macro_rules! delimeterized {
                                 let span = open.span().to(close.span());
                                 return Ok($ident {
                                     open: open.into_inner(),
-                                    inner: T::parse(&mut Cursor::new(
-                                        &mut cursor.stream[start..i],
-                                    ))?,
+                                    inner: T::parse(&mut cursor.slice(start..i))?,
                                     close: close.into_inner(),
                                 });
                             }
