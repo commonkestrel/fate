@@ -1,4 +1,8 @@
-use std::{borrow, ops::{self, Range}, sync::Arc};
+use std::{
+    borrow,
+    ops::{self, Range},
+    sync::Arc,
+};
 
 use colored::{Color, Colorize};
 
@@ -42,6 +46,13 @@ impl<T> Spanned<T> {
     #[inline]
     pub fn deconstruct(self) -> (T, Span) {
         (self.inner, self.span)
+    }
+
+    pub fn map<M, O>(self, map: M) -> Spanned<O>
+    where
+        M: FnOnce(T) -> O,
+    {
+        Spanned::new(map(self.inner), self.span)
     }
 }
 
