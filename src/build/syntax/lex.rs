@@ -12,15 +12,15 @@ use async_std::{
 };
 use logos::{Lexer, Logos};
 
-use super::{
+use crate::build::{
     ascii::{unescape_str, AsciiStr, UnescapeError},
     symbol_table::{SymbolRef, SymbolTable},
-    syntax::Parsable,
+    syntax::parse::Parsable,
 };
 
 const TAB_SPACING: &str = "    ";
 
-pub type TokenStream = Vec<Spanned<TokenInner>>;
+pub type TokenStream = Vec<Spanned<Token>>;
 pub type Errors = Vec<Diagnostic>;
 
 pub async fn lex(source: String, content: File) -> Result<TokenStream, Errors> {
@@ -39,7 +39,7 @@ pub async fn lex(source: String, content: File) -> Result<TokenStream, Errors> {
     let file = Arc::new(file.replace('\t', TAB_SPACING));
     let lookup = Arc::new(Lookup::new(file.clone()));
 
-    let mut lex = TokenInner::lexer(&file).spanned();
+    let mut lex = Token::lexer(&file).spanned();
     while let Some((tok, span)) = lex.next() {
         let s = Span::new(source.clone(), lookup.clone(), span);
 
@@ -67,8 +67,8 @@ pub fn lex_string(content: &str, source: &str) -> Result<TokenStream, Errors> {
     todo!()
 }
 
-impl Parsable for Spanned<TokenInner> {
-    fn parse(cursor: &mut super::syntax::Cursor) -> Result<Self, Diagnostic> {
+impl Parsable for Spanned<Token> {
+    fn parse(cursor: &mut super::parse::Cursor) -> Result<Self, Diagnostic> {
         cursor.next().ok_or_else(|| error!(""))
     }
 
@@ -81,7 +81,7 @@ impl Parsable for Spanned<TokenInner> {
 #[logos(error = Diagnostic)]
 #[logos(extras = SymbolTable)]
 #[logos(skip r"[ \t\f\n\r]")]
-pub enum TokenInner {
+pub enum Token {
     #[token("use", |_| Keyword::Use)]
     #[token("fn", |_| Keyword::Fn)]
     #[token("return", |_| Keyword::Return)]
@@ -97,10 +97,12 @@ pub enum TokenInner {
     #[token("match", |_| Keyword::Match)]
     #[token("for", |_| Keyword::For)]
     #[token("while", |_| Keyword::While)]
+    #[token("loop", |_| Keyword::Loop)]
     #[token("break", |_| Keyword::Break)]
     #[token("continue", |_| Keyword::Continue)]
     #[token("let", |_| Keyword::Let)]
     #[token("namespace", |_| Keyword::Namespace)]
+    #[token("as", |_| Keyword::As)]
     #[token("self", |_| Keyword::LowerSelf)]
     #[token("Self", |_| Keyword::UpperSelf)]
     Keyword(Keyword),
@@ -129,6 +131,10 @@ pub enum TokenInner {
     #[token("-=", |_| Punctuation::MinusEq)]
     #[token("*=", |_| Punctuation::MulEq)]
     #[token("/=", |_| Punctuation::DivEq)]
+    #[token("%=", |_| Punctuation::ModEq)]
+    #[token("&=", |_| Punctuation::AndEq)]
+    #[token("|=", |_| Punctuation::OrEq)]
+    #[token("^=", |_| Punctuation::XorEq)]
     #[token("=", |_| Punctuation::Eq)]
     #[token("==", |_| Punctuation::EqEq)]
     #[token("!=", |_| Punctuation::NotEqual)]
@@ -163,26 +169,26 @@ pub enum TokenInner {
     #[token("false", |_| false)]
     Boolean(bool),
 
-    #[regex(r"0b[01][_01]*", TokenInner::binary)]
-    #[regex(r"0o[0-7][_0-7]*", TokenInner::octal)]
-    #[regex(r"-?[0-9][_0-9]*", TokenInner::decimal)]
-    #[regex(r"0x[0-9a-fA-F][_0-9a-fA-F]*", TokenInner::hexadecimal)]
-    #[regex(r"'[\x00-\x7F]*'", TokenInner::char)]
-    #[regex(r#"'\\[(\\)n"at0rbfv]'"#, TokenInner::char)]
-    #[regex(r"'\\x[[:xdigit:]]{1,2}'", TokenInner::char)]
+    #[regex(r"0b[01][_01]*", Token::binary)]
+    #[regex(r"0o[0-7][_0-7]*", Token::octal)]
+    #[regex(r"-?[0-9][_0-9]*", Token::decimal)]
+    #[regex(r"0x[0-9a-fA-F][_0-9a-fA-F]*", Token::hexadecimal)]
+    #[regex(r"'[\x00-\x7F]*'", Token::char)]
+    #[regex(r#"'\\[(\\)n"at0rbfv]'"#, Token::char)]
+    #[regex(r"'\\x[[:xdigit:]]{1,2}'", Token::char)]
     Immediate(i64),
 
-    #[regex(r#""((\\")|[\x00-\x21\x23-\x7F])*""#, TokenInner::string)]
-    #[regex(r##"r#"((\\")|[\x00-\x21\x23-\x7F])*"#"##, TokenInner::raw_string)]
+    #[regex(r#""((\\")|[\x00-\x21\x23-\x7F])*""#, Token::string)]
+    #[regex(r##"r#"((\\")|[\x00-\x21\x23-\x7F])*"#"##, Token::raw_string)]
     String(AsciiStr),
 
-    #[regex(r"[_a-zA-Z][_a-zA-Z0-9]*", TokenInner::ident)]
+    #[regex(r"[_a-zA-Z][_a-zA-Z0-9]*", Token::ident)]
     Ident(SymbolRef),
 }
 
-impl TokenInner {
+impl Token {
     pub fn description(&self) -> &'static str {
-        use TokenInner as TI;
+        use Token as TI;
         match self {
             TI::Boolean(_) => "boolean",
             TI::Primitive(_) => "type",
@@ -195,27 +201,27 @@ impl TokenInner {
         }
     }
 
-    fn binary(lex: &mut Lexer<TokenInner>) -> Option<i64> {
+    fn binary(lex: &mut Lexer<Token>) -> Option<i64> {
         let slice = lex.slice().replace("_", "");
         i64::from_str_radix(&slice.strip_prefix("0b")?, 2).ok()
     }
 
-    fn octal(lex: &mut Lexer<TokenInner>) -> Option<i64> {
+    fn octal(lex: &mut Lexer<Token>) -> Option<i64> {
         let slice = lex.slice().replace("_", "");
         i64::from_str_radix(&slice.strip_prefix("0o")?, 8).ok()
     }
 
-    fn decimal(lex: &mut Lexer<TokenInner>) -> Option<i64> {
+    fn decimal(lex: &mut Lexer<Token>) -> Option<i64> {
         let slice = lex.slice().replace("_", "");
         i64::from_str_radix(&slice, 10).ok()
     }
 
-    fn hexadecimal(lex: &mut Lexer<TokenInner>) -> Option<i64> {
+    fn hexadecimal(lex: &mut Lexer<Token>) -> Option<i64> {
         let slice = lex.slice().replace("_", "");
         i64::from_str_radix(&slice.strip_prefix("0x")?, 16).ok()
     }
 
-    fn char(lex: &mut Lexer<TokenInner>) -> Result<i64, Diagnostic> {
+    fn char(lex: &mut Lexer<Token>) -> Result<i64, Diagnostic> {
         let slice = lex.slice();
         Self::char_from_str(slice).map(|c| c.into())
     }
@@ -238,7 +244,7 @@ impl TokenInner {
         Ok(escaped[0])
     }
 
-    fn string(lex: &mut Lexer<TokenInner>) -> Result<AsciiStr, Diagnostic> {
+    fn string(lex: &mut Lexer<Token>) -> Result<AsciiStr, Diagnostic> {
         let slice = lex
             .slice()
             .strip_prefix("\"")
@@ -256,7 +262,7 @@ impl TokenInner {
         })?)
     }
 
-    fn raw_string(lex: &mut Lexer<TokenInner>) -> Result<AsciiStr, Diagnostic> {
+    fn raw_string(lex: &mut Lexer<Token>) -> Result<AsciiStr, Diagnostic> {
         let slice = lex
             .slice()
             .strip_prefix("r#\"")
@@ -274,7 +280,7 @@ impl TokenInner {
         })?)
     }
 
-    fn ident(lex: &mut Lexer<TokenInner>) -> SymbolRef {
+    fn ident(lex: &mut Lexer<Token>) -> SymbolRef {
         lex.extras.get_or_insert(lex.slice())
     }
 }
@@ -296,10 +302,12 @@ pub enum Keyword {
     Match,
     For,
     While,
+    Loop,
     Break,
     Continue,
     Let,
     Namespace,
+    As,
     LowerSelf,
     UpperSelf,
 }
@@ -322,10 +330,12 @@ impl Keyword {
             Keyword::Match => "keyword `match",
             Keyword::For => "keyword `for`",
             Keyword::While => "keyword `while`",
+            Keyword::Loop => "keyword `loop`",
             Keyword::Break => "keyword `break`",
             Keyword::Continue => "keyword `continue`",
             Keyword::Let => "keyword `let`",
             Keyword::Namespace => "keyword `namespace`",
+            Keyword::As => "keyword `as`",
             Keyword::LowerSelf => "keyword `self`",
             Keyword::UpperSelf => "keyword `Self`",
         }
@@ -383,6 +393,14 @@ pub enum Punctuation {
     MulEq,
     /// `/=`
     DivEq,
+    /// `%=`
+    ModEq,
+    /// `&=`
+    AndEq,
+    /// `|=`
+    OrEq,
+    /// `^=`
+    XorEq,
     /// `==`
     EqEq,
     /// `!=`
@@ -433,6 +451,10 @@ impl Punctuation {
             Punctuation::MinusEq => "`-=`",
             Punctuation::MulEq => "`*=`",
             Punctuation::DivEq => "`/=`",
+            Punctuation::ModEq => "`%=`",
+            Punctuation::AndEq => "`&=`",
+            Punctuation::OrEq => "`|=`",
+            Punctuation::XorEq => "`^=`",
             Punctuation::EqEq => "`==`",
             Punctuation::NotEqual => "`!=`",
             Punctuation::And => "`&`",

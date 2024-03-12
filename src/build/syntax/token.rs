@@ -1,7 +1,7 @@
-use super::ascii::AsciiStr;
-use super::lexer::{Delimeter, Keyword, Punctuation, TokenInner};
-use super::symbol_table::SymbolRef;
-use super::syntax::{Cursor, Parsable};
+use super::lex::{Delimeter, Keyword, Punctuation, Token};
+use super::parse::{Cursor, Parsable};
+use crate::build::ascii::AsciiStr;
+use crate::build::symbol_table::SymbolRef;
 use crate::diagnostic::Diagnostic;
 use crate::span::Spanned;
 use crate::{error, spanned_error};
@@ -12,11 +12,26 @@ macro_rules! parsable {
             #[derive(Debug, Clone, PartialEq)]
             pub struct $name;
 
+            impl Parsable for $name {
+                fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+                    let next = cursor.next().map(Spanned::deconstruct);
+                    match next {
+                        Some((Token::$token($inner), _)) => Ok($name),
+                        Some((tok, span)) => Err(spanned_error!(span, concat!("expected ", $description, ", found {}"), tok.description())),
+                        None => Err(error!(concat!("expected ", $description, ", found EOF"),)),
+                    }
+                }
+
+                fn description(&self) -> &'static str {
+                    $description
+                }
+            }
+
             impl Parsable for Spanned<$name> {
                 fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
                     let next = cursor.next().map(Spanned::deconstruct);
                     match next {
-                        Some((TokenInner::$token($inner), span)) => Ok(Spanned::new($name, span)),
+                        Some((Token::$token($inner), span)) => Ok(Spanned::new($name, span)),
                         Some((tok, span)) => Err(spanned_error!(span, concat!("expected ", $description, ", found {}"), tok.description())),
                         None => Err(error!(concat!("expected ", $description, ", found EOF"),))
                     }
@@ -41,7 +56,7 @@ macro_rules! parsable {
                 fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
                     let next = cursor.next().map(Spanned::deconstruct);
                     match next {
-                        Some((TokenInner::$token($inner), span)) => Ok(Spanned::new($name { $($field)* }, span)),
+                        Some((Token::$token($inner), span)) => Ok(Spanned::new($name { $($field)* }, span)),
                         Some((tok, span)) => Err(spanned_error!(span, concat!("expected ", $description, ", found {}"), tok.description())),
                         None => Err(error!(concat!("expected ", $description, ", found EOF"),))
                     }
@@ -67,8 +82,6 @@ parsable! {
 }
 
 //------ Punctuation ------//
-
-
 
 parsable! {
     "="  : Punctuation(Punctuation::Eq) => Eq,
@@ -132,5 +145,5 @@ parsable! {
 parsable! {
     "integer" : Immediate(value) => Immediate { pub value: i64 },
     "string" : String(value) => StringLit { pub value: AsciiStr },
-    "identifier" : Ident(position) => Ident { pub position: SymbolRef },
+    "identifier" : Ident(symbol) => Ident { pub symbol: SymbolRef },
 }

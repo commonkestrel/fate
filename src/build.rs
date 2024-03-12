@@ -1,5 +1,5 @@
 use crate::{
-    build::lexer::TokenInner,
+    build::syntax::lex::Token,
     cfg::{Config, ConfigError, ProjectType},
 };
 use async_std::fs::File;
@@ -9,13 +9,20 @@ use thiserror::Error;
 
 mod ascii;
 mod deps;
-mod ast;
 mod generator;
-pub mod lexer;
 mod symbol_table;
-mod syntax;
-pub mod token;
-mod type_resolution;
+mod syntax {
+    pub mod ast;
+    pub mod lex;
+    pub mod parse;
+    pub mod token;
+}
+mod frontend {
+    pub mod type_resolution;
+    pub mod ast {
+        pub mod typed;
+    }
+}
 
 const SOURCE: &str = "src";
 
@@ -56,7 +63,7 @@ pub async fn build(args: BuildArgs) -> Result<(), BuildError> {
         .await
         .map_err(|err| BuildError::Root(err))?;
 
-    let root_stream = match lexer::lex(root_path.to_string_lossy().to_string(), root).await {
+    let root_stream = match syntax::lex::lex(root_path.to_string_lossy().to_string(), root).await {
         Ok(stream) => stream,
         Err(errors) => {
             for err in errors {
@@ -73,7 +80,7 @@ pub async fn build(args: BuildArgs) -> Result<(), BuildError> {
             root_stream
                 .into_iter()
                 .map(|tok| tok.into_inner())
-                .collect::<Vec<TokenInner>>()
+                .collect::<Vec<Token>>()
         );
     }
 
