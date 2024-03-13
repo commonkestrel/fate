@@ -23,7 +23,13 @@ const TAB_SPACING: &str = "    ";
 pub type TokenStream = Vec<Spanned<Token>>;
 pub type Errors = Vec<Diagnostic>;
 
-pub async fn lex(source: String, content: File) -> Result<TokenStream, Errors> {
+pub struct LexResult {
+    pub stream: TokenStream,
+    pub source: Arc<String>,
+    pub lookup: Arc<Lookup>,
+}
+
+pub async fn lex(source: String, content: File) -> Result<LexResult, Errors> {
     let mut tokens = TokenStream::new();
     let mut errors = Errors::new();
     let source = Arc::new(source);
@@ -57,7 +63,7 @@ pub async fn lex(source: String, content: File) -> Result<TokenStream, Errors> {
     }
 
     if errors.is_empty() {
-        Ok(tokens)
+        Ok(LexResult {stream: tokens, source, lookup})
     } else {
         Err(errors)
     }
@@ -73,7 +79,7 @@ impl Parsable for Spanned<Token> {
     }
 
     fn description(&self) -> &'static str {
-        self.description()
+        self.inner().description()
     }
 }
 
@@ -110,16 +116,17 @@ pub enum Token {
 
     #[token("(", |_| Delimeter::OpenParen)]
     #[token(")", |_| Delimeter::CloseParen)]
-    #[token("[", |_| Delimeter::OpenBrace)]
-    #[token("]", |_| Delimeter::CloseBrace)]
-    #[token("{", |_| Delimeter::OpenBracket)]
-    #[token("}", |_| Delimeter::CloseBracket)]
+    #[token("[", |_| Delimeter::OpenBracket)]
+    #[token("]", |_| Delimeter::CloseBracket)]
+    #[token("{", |_| Delimeter::OpenBrace)]
+    #[token("}", |_| Delimeter::CloseBrace)]
     Delimeter(Delimeter),
 
     #[token("+", |_| Punctuation::Plus)]
     #[token("-", |_| Punctuation::Minus)]
     #[token("*", |_| Punctuation::Star)]
     #[token("/", |_| Punctuation::Slash)]
+    #[token("%", |_| Punctuation::Percent)]
     #[token("<<", |_| Punctuation::Shl)]
     #[token(">>", |_| Punctuation::Shr)]
     #[token("!", |_| Punctuation::Not)]

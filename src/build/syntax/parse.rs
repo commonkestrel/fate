@@ -5,7 +5,7 @@ use std::{
 use async_std::path::PathBuf;
 use indexmap::IndexMap;
 
-pub fn parse_functions(mut stream: TokenStream, source_name: Arc<String>, lookup: Arc<Lookup>) -> Result<Vec<FnDefinition>, Diagnostic> {
+pub fn parse_functions(mut stream: TokenStream, source_name: Arc<String>, lookup: Arc<Lookup>) -> Result<Vec<Spanned<FnDefinition>>, Diagnostic> {
     let mut cursor = Cursor::new(&mut stream, source_name, lookup);
     let mut functions = Vec::new();
 
@@ -38,14 +38,14 @@ use crate::{
 pub fn parse<L>(stream: TokenStream) {}
 
 pub struct Cursor<'a> {
-    stream: &'a mut [Spanned<Token>],
-    position: usize,
+    stream: &'a [Spanned<Token>],
+    pub position: usize,
     eof_span: Span,
 }
 
 impl<'a> Cursor<'a> {
     #[inline]
-    pub fn new(stream: &'a mut [Spanned<Token>], source_name: Arc<String>, lookup: Arc<Lookup>) -> Self {
+    pub fn new(stream: &'a [Spanned<Token>], source_name: Arc<String>, lookup: Arc<Lookup>) -> Self {
         let end_position = stream.last().map(|last| last.span().end()-1..last.span().end()).unwrap_or(0..1);
         Self {
             stream,
@@ -57,6 +57,11 @@ impl<'a> Cursor<'a> {
     #[inline]
     pub fn parse<T: Parsable>(&mut self) -> Result<T, Diagnostic> {
         T::parse(self)
+    }
+
+    #[inline]
+    pub fn stream(&self) -> &[Spanned<Token>] {
+        self.stream
     }
 
     #[inline]
@@ -98,9 +103,10 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    #[track_caller]
     pub fn slice<R: Into<Range<usize>>>(&mut self, range: R) -> Cursor {
         Cursor::new(
-            &mut self.stream[range.into()],
+            &self.stream[range.into()],
             self.eof_span.source_name(),
             self.eof_span.lookup(),
         )
@@ -205,10 +211,9 @@ macro_rules! delimeterized {
                         $close_inner => {
                             if depth == 0 {
                                 let close: Spanned<$close> = cursor.parse()?;
-                                let span = open.span().to(close.span());
                                 return Ok($ident {
                                     open: open.into_inner(),
-                                    inner: T::parse(&mut cursor.slice(start..i))?,
+                                    inner: T::parse(&mut cursor.slice(start..(start+i)))?,
                                     close: close.into_inner(),
                                 });
                             }

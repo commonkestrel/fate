@@ -7,6 +7,8 @@ use clap::Args;
 use std::path::PathBuf;
 use thiserror::Error;
 
+use self::syntax::parse;
+
 mod ascii;
 mod deps;
 mod generator;
@@ -78,11 +80,25 @@ pub async fn build(args: BuildArgs) -> Result<(), BuildError> {
         println!(
             "{:#?}",
             root_stream
-                .into_iter()
-                .map(|tok| tok.into_inner())
-                .collect::<Vec<Token>>()
+                .stream
+                .iter()
+                .map(|tok| tok.inner())
+                .collect::<Vec<&Token>>()
         );
     }
+
+    let functions = match parse::parse_functions(root_stream.stream, root_stream.source, root_stream.lookup) {
+        Ok(stream) => stream,
+        Err(errors) => {
+            errors.emit().await;
+
+            return Err(BuildError::Lex(root_path));
+        }
+    };
+
+    println!(
+        "{functions:#?}"
+    );
 
     Ok(())
 }
