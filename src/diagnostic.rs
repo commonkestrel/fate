@@ -31,6 +31,22 @@ impl Diagnostic {
         }
     }
 
+    pub fn debug<S: Into<String>>(message: S) -> Self {
+        Diagnostic {
+            message: message.into(),
+            span: None,
+            level: Level::Debug,
+        }
+    }
+
+    pub fn spanned_debug<M: Into<String>, S: Into<Arc<Span>>>(span: S, message: M) -> Self {
+        Diagnostic {
+            message: message.into(),
+            span: Some(span.into()),
+            level: Level::Debug,
+        }
+    }
+
     pub fn set_span<S: Into<Arc<Span>>>(&mut self, span: Option<S>) {
         self.span = span.map(|s| s.into());
     }
@@ -63,6 +79,14 @@ impl Diagnostic {
             self.emit_fancy().await;
         } else {
             self.raw_emit().await;
+        }
+    }
+
+    pub fn sync_emit(self) {
+        if io::stdout().is_terminal() {
+            async_std::task::block_on(self.emit_fancy());
+        } else {
+            async_std::task::block_on(self.raw_emit());
         }
     }
 
@@ -151,4 +175,14 @@ macro_rules! error {
 #[macro_export]
 macro_rules! spanned_error {
     ($span:expr, $($arg:tt)*) => ($crate::diagnostic::Diagnostic::spanned_error($span, ::std::format!($($arg)*)))
+}
+
+#[macro_export]
+macro_rules! debug {
+    ($($arg:tt)*) => ($crate::diagnostic::Diagnostic::debug(::std::format!($($arg)*)))
+}
+
+#[macro_export]
+macro_rules! spanned_debug {
+    ($span:expr, $($arg:tt)*) => ($crate::diagnostic::Diagnostic::spanned_debug($span, ::std::format!($($arg)*)))
 }

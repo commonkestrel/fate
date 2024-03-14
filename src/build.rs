@@ -76,16 +76,16 @@ pub async fn build(args: BuildArgs) -> Result<(), BuildError> {
         }
     };
 
-    if cfg!(debug_assertions) {
-        println!(
-            "{:#?}",
-            root_stream
-                .stream
-                .iter()
-                .map(|tok| tok.inner())
-                .collect::<Vec<&Token>>()
-        );
-    }
+    // if cfg!(debug_assertions) {
+    //     println!(
+    //         "{:#?}",
+    //         root_stream
+    //             .stream
+    //             .iter()
+    //             .map(|tok| tok.inner())
+    //             .collect::<Vec<&Token>>()
+    //     );
+    // }
 
     let functions = match parse::parse_functions(root_stream.stream, root_stream.source, root_stream.lookup) {
         Ok(stream) => stream,
