@@ -1,7 +1,30 @@
 use std::alloc;
+use std::io::puts;
 
-fn main() {
-    let string = "hello world";
+enum FooBar {
+    Foo,
+    Bar {
+        foo: u8,
+        bar: *u24,
+    }
+    Baz<u8>,
+    Qux<*u8, u16>
+}
+
+fn main(): void {
+    let string: str = "hello world";
+
+    let foobar: FooBar = FooBar::Baz<0, 132>;
+    // match foobar {
+    //     Foo => puts("foo"),
+    //     Bar {foo, bar} => puts("bar"),
+    //     Baz<foo> => puts("baz"),
+    //     Qux<start, len> => puts("qux"),
+    // }
+}
+
+pub fn sin_cos(n: u8): <u8, u8> {
+    return <sin(n), cos(n)>
 }
 
 struct String {
@@ -10,12 +33,8 @@ struct String {
     len: u16,
 }
 
-struct StringRef {
-    
-}
-
 impl String {
-    pub fn new() -> String {
+    pub fn new(): String {
         // Alloc a single slot for 
         let ptr = alloc::malloc(1);
         String {
@@ -25,7 +44,7 @@ impl String {
         }
     }
 
-    pub fn from(s: str) -> String {
+    pub fn from(s: str): String {
         let ptr = alloc::malloc(s.len());
         String {
             ptr = ptr,
