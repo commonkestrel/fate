@@ -24,7 +24,7 @@ fn main(): void {
 }
 
 pub fn sin_cos(n: u8): <u8, u8> {
-    return <sin(n), cos(n)>
+    return <sin(n), cos(n)>;
 }
 
 struct String {
@@ -36,20 +36,20 @@ struct String {
 impl String {
     pub fn new(): String {
         // Alloc a single slot for 
-        let ptr = alloc::malloc(1);
-        String {
+        let ptr: *mut u8 = alloc::malloc(1);
+        return String {
             ptr = ptr,
             capacity = 1,
             len = 0,
-        }
+        };
     }
 
     pub fn from(s: str): String {
-        let ptr = alloc::malloc(s.len());
-        String {
+        let ptr: *mut u8 = alloc::malloc(s.len());
+        return String {
             ptr = ptr,
             capacity = s.len(),
             
-        }
+        };
     }
 }
