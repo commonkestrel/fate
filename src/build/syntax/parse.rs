@@ -1,11 +1,18 @@
 use std::{
-    collections::HashMap, ops::{Deref, Range, RangeBounds, RangeInclusive}, slice::SliceIndex, sync::Arc
+    collections::HashMap,
+    ops::{Deref, Range, RangeBounds, RangeInclusive},
+    slice::SliceIndex,
+    sync::Arc,
 };
 
 use async_std::path::PathBuf;
 use indexmap::IndexMap;
 
-pub fn parse_functions(mut stream: TokenStream, source_name: Arc<String>, lookup: Arc<Lookup>) -> Result<Vec<Spanned<FnDefinition>>, Diagnostic> {
+pub fn parse_functions(
+    mut stream: TokenStream,
+    source_name: Arc<String>,
+    lookup: Arc<Lookup>,
+) -> Result<Vec<Spanned<FnDefinition>>, Diagnostic> {
     let mut cursor = Cursor::new(&mut stream, source_name, lookup);
     let mut functions = Vec::new();
 
@@ -45,8 +52,15 @@ pub struct Cursor<'a> {
 
 impl<'a> Cursor<'a> {
     #[inline]
-    pub fn new(stream: &'a [Spanned<Token>], source_name: Arc<String>, lookup: Arc<Lookup>) -> Self {
-        let end_position = stream.last().map(|last| last.span().end()-1..last.span().end()).unwrap_or(0..1);
+    pub fn new(
+        stream: &'a [Spanned<Token>],
+        source_name: Arc<String>,
+        lookup: Arc<Lookup>,
+    ) -> Self {
+        let end_position = stream
+            .last()
+            .map(|last| last.span().end() - 1..last.span().end())
+            .unwrap_or(0..1);
         Self {
             stream,
             position: 0,
@@ -155,6 +169,12 @@ macro_rules! delimeterized {
             close: $close,
         }
 
+        impl<T> $ident<T> {
+            pub fn inner(&self) -> &T {
+                &self.inner
+            }
+        }
+
         impl<T: Parsable> Parsable for Spanned<$ident<T>> {
             fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
                 let open: Spanned<$open> = cursor.parse()?;
@@ -213,7 +233,7 @@ macro_rules! delimeterized {
                                 let close: Spanned<$close> = cursor.parse()?;
                                 return Ok($ident {
                                     open: open.into_inner(),
-                                    inner: T::parse(&mut cursor.slice(start..(start+i)))?,
+                                    inner: T::parse(&mut cursor.slice(start..(start + i)))?,
                                     close: close.into_inner(),
                                 });
                             }
@@ -299,6 +319,15 @@ impl<T, S> Punctuated<T, S> {
         self.last
             .as_deref()
             .or_else(|| self.inner.last().map(|both| &both.0))
+    }
+
+    pub fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &T> + 'a> {
+        Box::new(
+            self.inner
+                .iter()
+                .map(|pair| &pair.0)
+                .chain(self.last.iter()),
+        )
     }
 }
 

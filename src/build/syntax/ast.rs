@@ -1,7 +1,12 @@
 use indexmap::IndexMap;
 
 use crate::{
-    debug, diagnostic::Diagnostic, error, punctuated, span::{Span, Spanned}, spanned_debug, spanned_error, Token
+    build::ascii::AsciiStr,
+    debug,
+    diagnostic::Diagnostic,
+    error, punctuated,
+    span::{Span, Spanned},
+    spanned_debug, spanned_error, Token,
 };
 
 use super::{
@@ -29,6 +34,22 @@ pub enum Type {
     Vector(Vec<Spanned<Type>>),
     Composite(Ident),
     Err(Diagnostic),
+}
+
+impl Type {
+    pub fn bubble_errors(&self, output: &mut Vec<Diagnostic>) {
+        match self {
+            Type::Primitive(_) => {}
+            Type::Composite(_) => {}
+            Type::Vector(types) => types.iter().for_each(|ty| ty.bubble_errors(output)),
+            Type::Pointer { ty, .. } => ty.bubble_errors(output),
+            Type::Array { ty, len } => {
+                ty.bubble_errors(output);
+                len.bubble_errors(output);
+            }
+            Type::Err(err) => output.push(err.clone()),
+        }
+    }
 }
 
 impl Parsable for Spanned<Type> {
@@ -148,6 +169,7 @@ enum Variant {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Immediate(i64),
+    Str(AsciiStr),
     Reference(Path),
     Call(Box<Spanned<Expr>>, Punctuated<Spanned<Expr>, Token![,]>),
     Constructor {
@@ -177,6 +199,34 @@ impl Parsable for Spanned<Expr> {
 }
 
 impl Expr {
+    pub fn bubble_errors(&self, output: &mut Vec<Diagnostic>) {
+        match self {
+            Expr::Immediate(_) => {}
+            Expr::Reference(_) => {}
+            Expr::Str(_) => {}
+            Expr::Cast(_, expr) => expr.bubble_errors(output),
+            Expr::Call(expr, params) => {
+                expr.bubble_errors(output);
+                params
+                    .values()
+                    .for_each(|param| param.bubble_errors(output));
+            }
+            Expr::Constructor { ident, components } => components
+                .values()
+                .for_each(|component| component.bubble_errors(output)),
+            Expr::NamedConstructor { ident, fields } => fields
+                .values()
+                .for_each(|field| field.value.bubble_errors(output)),
+            Expr::Vector(exprs) => exprs.iter().for_each(|expr| expr.bubble_errors(output)),
+            Expr::BinaryOp(op) => {
+                op.left.bubble_errors(output);
+                op.right.bubble_errors(output);
+            }
+            Expr::UnaryOp(_, expr) => expr.bubble_errors(output),
+            Expr::Err(err) => output.push(err.clone()),
+        }
+    }
+
     fn parse_assignment(cursor: &mut Cursor) -> Spanned<Self> {
         let mut a = Expr::parse_boolean(cursor);
 
@@ -593,6 +643,7 @@ impl Expr {
 
         match tok {
             Token::Immediate(i) => Spanned::new(Expr::Immediate(i), span),
+            Token::String(str) => Spanned::new(Expr::Str(str), span),
             Token::Punctuation(Punctuation::Lt) => {
                 let mut components = Vec::new();
 
@@ -698,15 +749,54 @@ impl Expr {
 
                 cursor.step_back();
 
-                // TODO: actually working path parsing
+                let mut path_inner = Vec::new();
+                let mut last_ident = None;
 
-                let path = match cursor.parse() {
-                    Ok(path) => path,
-                    Err(err) => return Spanned::new(Expr::Err(err), span),
-                };
+                while let Some(tok) = cursor.peek().cloned() {
+                    match tok.inner() {
+                        Token::Ident(_) => {
+                            if last_ident.is_some() {
+                                return Spanned::new(
+                                    Expr::Err(spanned_error!(
+                                        tok.span().clone(),
+                                        "expected seperator, found duplicate ident"
+                                    )),
+                                    tok.span().clone(),
+                                );
+                            }
+
+                            last_ident = Some(match cursor.parse() {
+                                Ok(ident) => ident,
+                                Err(err) => return Spanned::new(Expr::Err(err), tok.into_span()),
+                            });
+                        }
+                        Token::Punctuation(Punctuation::DoubleColon) => match last_ident.take() {
+                            Some(l) => path_inner.push((
+                                l,
+                                match cursor.parse() {
+                                    Ok(field) => field,
+                                    Err(err) => {
+                                        return Spanned::new(Expr::Err(err), tok.into_span())
+                                    }
+                                },
+                            )),
+                            None => {
+                                return Spanned::new(
+                                    Expr::Err(spanned_error!(
+                                        tok.span().clone(),
+                                        "unexpected duplicate seperator"
+                                    )),
+                                    tok.into_span(),
+                                )
+                            }
+                        },
+                        _ => break,
+                    }
+                }
+
+                let path = Punctuated::new(path_inner, last_ident);
 
                 debug!("after ident").sync_emit();
-
 
                 match cursor.peek().map(Spanned::inner) {
                     Some(Token::Delimeter(Delimeter::OpenBrace)) => {
@@ -759,7 +849,7 @@ impl Expr {
                         )
                     }
                     Some(Token::Punctuation(Punctuation::Lt)) => {
-                        println!("lt");
+                        debug!("lt").sync_emit();
 
                         cursor.step();
                         let mut components_inner = Vec::new();
@@ -767,30 +857,24 @@ impl Expr {
 
                         while let Some(tok) = cursor.peek() {
                             match tok.inner() {
-                                Token::Punctuation(Punctuation::Gt) => {
-                                    cursor.step();
-                                    break;
-                                },
-                                Token::Punctuation(Punctuation::Comma) => match last_component
-                                    .take()
-                                {
-                                    Some(l) => {
-                                        cursor.step();
-                                        components_inner.push((
-                                            l,
-                                            Token![,],
-                                        ));
-                                    },
-                                    None => {
-                                        return Spanned::new(
-                                            Expr::Err(spanned_error!(
-                                                tok.span().clone(),
-                                                "unexpected duplicate seperator"
-                                            )),
-                                            span,
-                                        )
+                                Token::Punctuation(Punctuation::Gt) => break,
+                                Token::Punctuation(Punctuation::Comma) => {
+                                    match last_component.take() {
+                                        Some(l) => {
+                                            cursor.step();
+                                            components_inner.push((l, Token![,]));
+                                        }
+                                        None => {
+                                            return Spanned::new(
+                                                Expr::Err(spanned_error!(
+                                                    tok.span().clone(),
+                                                    "unexpected duplicate seperator"
+                                                )),
+                                                span,
+                                            )
+                                        }
                                     }
-                                },
+                                }
                                 _ => {
                                     last_component = Some(match cursor.parse() {
                                         Ok(field) => field,
@@ -800,16 +884,18 @@ impl Expr {
                             }
                         }
 
-                        let fields = Punctuated::new(components_inner, last_component);
-                        let close: Spanned<CloseBrace> = match cursor.parse() {
+                        debug!("after components").sync_emit();
+
+                        let components = Punctuated::new(components_inner, last_component);
+                        let close: Spanned<Token![>]> = match cursor.parse() {
                             Ok(field) => field,
                             Err(err) => return Spanned::new(Expr::Err(err), span),
                         };
 
                         Spanned::new(
-                            Expr::NamedConstructor {
+                            Expr::Constructor {
                                 ident: path,
-                                fields,
+                                components,
                             },
                             span.to(close.span()),
                         )
@@ -880,7 +966,7 @@ pub enum UnaryOp {
 }
 
 #[derive(Debug, Clone)]
-enum Statement {
+pub enum Statement {
     Expr(Expr),
     Block(Vec<Spanned<Statement>>),
     If {
@@ -906,6 +992,44 @@ enum Statement {
         ty: Spanned<Type>,
         assignment: Spanned<Expr>,
     },
+}
+
+impl Statement {
+    pub fn bubble_errors(&self, output: &mut Vec<Diagnostic>) {
+        match self {
+            Statement::Break | Statement::Continue => {}
+            Statement::Expr(expr) => expr.bubble_errors(output),
+            Statement::If {
+                condition,
+                content,
+                else_block,
+            } => {
+                condition.bubble_errors(output);
+                content.bubble_errors(output);
+                if let Some(block) = else_block {
+                    block.bubble_errors(output);
+                }
+            }
+            Statement::Loop(content) => content.bubble_errors(output),
+            Statement::For { contents, header } => {
+                header.init.bubble_errors(output);
+                header.check.bubble_errors(output);
+                header.post.bubble_errors(output);
+
+                contents.bubble_errors(output);
+            }
+            Statement::While { check, contents } => {
+                check.bubble_errors(output);
+                contents.bubble_errors(output);
+            }
+            Statement::Let { assignment, ty, .. } => {
+                assignment.bubble_errors(output);
+                ty.bubble_errors(output);
+            }
+            Statement::Return(expr) => expr.bubble_errors(output),
+            Statement::Block(content) => content.iter().for_each(|s| s.bubble_errors(output)),
+        }
+    }
 }
 
 impl Parsable for Spanned<Statement> {
@@ -987,9 +1111,29 @@ impl Parsable for Spanned<Statement> {
             }
             Token::Keyword(Keyword::Let) => {
                 let mutability = cursor.parse()?;
-                let ident = cursor.parse()?;
-                let _: Colon = cursor.parse()?;
-                let ty = cursor.parse()?;
+                let ident: Spanned<Ident> = cursor.parse()?;
+
+                let ty: Spanned<Type> = if cursor.check(&Token::Punctuation(Punctuation::Colon)) {
+                    cursor.step();
+                    match cursor.parse() {
+                        Ok(ty) => ty,
+                        Err(err) => {
+                            cursor.step_back();
+                            Spanned::new(Type::Err(err), ident.span().clone())
+                        }
+                    }
+                } else {
+                    debug!("no type").sync_emit();
+
+                    Spanned::new(
+                        Type::Err(spanned_error!(
+                            ident.span().clone(),
+                            "missing type for variable declaration"
+                        )),
+                        ident.span().clone(),
+                    )
+                };
+
                 let _: Eq = cursor.parse()?;
                 let assignment: Spanned<Expr> = cursor.parse()?;
 
@@ -1063,10 +1207,10 @@ impl Parsable for Mutability {
 
 #[derive(Debug, Clone)]
 pub struct FnDefinition {
-    ident: Spanned<Ident>,
-    parameters: Parenthesized<Punctuated<FnParam, Comma>>,
-    return_type: Spanned<Type>,
-    body: Spanned<Statement>,
+    pub ident: Spanned<Ident>,
+    pub parameters: Parenthesized<Punctuated<FnParam, Comma>>,
+    pub return_type: Spanned<Type>,
+    pub body: Spanned<Statement>,
 }
 
 impl Parsable for Spanned<FnDefinition> {
@@ -1106,10 +1250,10 @@ impl Parsable for Spanned<FnDefinition> {
 }
 
 #[derive(Debug, Clone)]
-struct FnParam {
-    mutability: Mutability,
-    ident: Spanned<Ident>,
-    ty: Spanned<Type>,
+pub struct FnParam {
+    pub mutability: Mutability,
+    pub ident: Spanned<Ident>,
+    pub ty: Spanned<Type>,
 }
 
 impl Parsable for FnParam {

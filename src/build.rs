@@ -87,18 +87,37 @@ pub async fn build(args: BuildArgs) -> Result<(), BuildError> {
     //     );
     // }
 
-    let functions = match parse::parse_functions(root_stream.stream, root_stream.source, root_stream.lookup) {
-        Ok(stream) => stream,
-        Err(errors) => {
-            errors.emit().await;
+    let functions =
+        match parse::parse_functions(root_stream.stream, root_stream.source, root_stream.lookup) {
+            Ok(stream) => stream,
+            Err(errors) => {
+                errors.emit().await;
 
-            return Err(BuildError::Lex(root_path));
+                return Err(BuildError::Lex(root_path));
+            }
+        };
+
+    let mut errors = Vec::new();
+    for function in &functions {
+        function
+            .parameters
+            .inner()
+            .values()
+            .for_each(|param| param.ty.bubble_errors(&mut errors));
+
+        function.return_type.bubble_errors(&mut errors);
+        function.body.bubble_errors(&mut errors);
+    }
+
+    if !errors.is_empty() {
+        for error in errors {
+            error.emit().await
         }
-    };
 
-    println!(
-        "{functions:#?}"
-    );
+        return Err(BuildError::Lex(root_path));
+    }
+
+    // println!("{functions:#?}");
 
     Ok(())
 }
