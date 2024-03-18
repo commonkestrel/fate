@@ -4,7 +4,9 @@ use crate::{
 };
 use async_std::fs::File;
 use clap::Args;
+use colored::Colorize;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 use self::syntax::parse;
@@ -65,6 +67,8 @@ pub async fn build(args: BuildArgs) -> Result<(), BuildError> {
         .await
         .map_err(|err| BuildError::Root(err))?;
 
+    let start = Instant::now();
+
     let root_stream = match syntax::lex::lex(root_path.to_string_lossy().to_string(), root).await {
         Ok(stream) => stream,
         Err(errors) => {
@@ -118,6 +122,22 @@ pub async fn build(args: BuildArgs) -> Result<(), BuildError> {
     }
 
     // println!("{functions:#?}");
+    println!(
+        "\t{} building {} in {}",
+        "Finished".bold().green(),
+        root_path.display(),
+        elapsed(start.elapsed()),
+    );
 
     Ok(())
+}
+
+fn elapsed(duration: Duration) -> String {
+    let secs = duration.as_secs();
+
+    if secs >= 60 {
+        format!("{}m {:02}s", secs / 60, secs % 60)
+    } else {
+        format!("{}.{:02}s", secs, duration.subsec_nanos() / 10_000_000)
+    }
 }
