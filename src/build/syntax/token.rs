@@ -68,7 +68,7 @@ macro_rules! parsable {
                     match next {
                         Some((Token::$token($inner), _)) => Ok($name),
                         Some((tok, span)) => Err(spanned_error!(span, concat!("expected ", $description, ", found {}"), tok.description())),
-                        None => Err(error!(concat!("expected ", $description, ", found EOF"),)),
+                        None => Err(spanned_error!(cursor.eof_span(), concat!("expected ", $description, ", found `EOF`")))
                     }
                 }
 
@@ -83,7 +83,7 @@ macro_rules! parsable {
                     match next {
                         Some((Token::$token($inner), span)) => Ok(Spanned::new($name, span)),
                         Some((tok, span)) => Err(spanned_error!(span, concat!("expected ", $description, ", found {}"), tok.description())),
-                        None => Err(error!(concat!("expected ", $description, ", found EOF"),))
+                        None => Err(spanned_error!(cursor.eof_span(), concat!("expected ", $description, ", found `EOF`")))
                     }
                 }
 
@@ -108,7 +108,7 @@ macro_rules! parsable {
                     match next {
                         Some((Token::$token($inner), span)) => Ok(Spanned::new($name { $($field)* }, span)),
                         Some((tok, span)) => Err(spanned_error!(span, concat!("expected ", $description, ", found {}"), tok.description())),
-                        None => Err(error!(concat!("expected ", $description, ", found EOF"),))
+                        None => Err(spanned_error!(cursor.eof_span(), concat!("expected ", $description, ", found `EOF`")))
                     }
                 }
 
@@ -134,36 +134,36 @@ parsable! {
 //------ Punctuation ------//
 
 parsable! {
-    "="  : Punctuation(Punctuation::Eq) => Eq,
-    "==" : Punctuation(Punctuation::EqEq) => EqEq,
-    "!=" : Punctuation(Punctuation::NotEqual) => Ne,
-    "<"  : Punctuation(Punctuation::Lt) => Lt,
-    "<=" : Punctuation(Punctuation::Le) => Le,
-    ">"  : Punctuation(Punctuation::Gt) => Gt,
-    ">=" : Punctuation(Punctuation::Ge) => Ge,
-    "&"  : Punctuation(Punctuation::And) => And,
-    "&&" : Punctuation(Punctuation::AndAnd) => AndAnd,
-    "|"  : Punctuation(Punctuation::Pipe) => Pipe,
-    "||" : Punctuation(Punctuation::PipePipe) => PipePipe,
-    "^"  : Punctuation(Punctuation::Caret) => Caret,
-    "!"  : Punctuation(Punctuation::Not) => Not,
-    "+"  : Punctuation(Punctuation::Plus) => Plus,
-    "-"  : Punctuation(Punctuation::Minus) => Minus,
-    "/"  : Punctuation(Punctuation::Slash) => Slash,
-    "*"  : Punctuation(Punctuation::Star) => Star,
-    "%"  : Punctuation(Punctuation::Percent) => Percent,
-    "+=" : Punctuation(Punctuation::PlusEq) => PlusEq,
-    "-=" : Punctuation(Punctuation::MinusEq) => MinusEq,
-    "*=" : Punctuation(Punctuation::MulEq) => MulEq,
-    "/=" : Punctuation(Punctuation::DivEq) => DivEq,
-    "%=" : Punctuation(Punctuation::ModEq) => ModEq,
-    "<<" : Punctuation(Punctuation::Shl) => Shl,
-    ">>" : Punctuation(Punctuation::Shr) => Shr,
-    ","  : Punctuation(Punctuation::Comma) => Comma,
-    ";"  : Punctuation(Punctuation::Semicolon) => Semicolon,
-    ":"  : Punctuation(Punctuation::Colon) => Colon,
-    "::" : Punctuation(Punctuation::DoubleColon) => DoubleColon,
-    "?"  : Punctuation(Punctuation::Question) => Question,
+    "`=`"  : Punctuation(Punctuation::Eq) => Eq,
+    "`==`" : Punctuation(Punctuation::EqEq) => EqEq,
+    "`!=`" : Punctuation(Punctuation::NotEqual) => Ne,
+    "`<`"  : Punctuation(Punctuation::Lt) => Lt,
+    "`<=`" : Punctuation(Punctuation::Le) => Le,
+    "`>`"  : Punctuation(Punctuation::Gt) => Gt,
+    "`>=`" : Punctuation(Punctuation::Ge) => Ge,
+    "`&`"  : Punctuation(Punctuation::And) => And,
+    "`&&`" : Punctuation(Punctuation::AndAnd) => AndAnd,
+    "`|`"  : Punctuation(Punctuation::Pipe) => Pipe,
+    "`||`" : Punctuation(Punctuation::PipePipe) => PipePipe,
+    "`^`"  : Punctuation(Punctuation::Caret) => Caret,
+    "`!`"  : Punctuation(Punctuation::Not) => Not,
+    "`+`"  : Punctuation(Punctuation::Plus) => Plus,
+    "`-`"  : Punctuation(Punctuation::Minus) => Minus,
+    "`/`"  : Punctuation(Punctuation::Slash) => Slash,
+    "`*`"  : Punctuation(Punctuation::Star) => Star,
+    "`%`"  : Punctuation(Punctuation::Percent) => Percent,
+    "`+=`" : Punctuation(Punctuation::PlusEq) => PlusEq,
+    "`-=`" : Punctuation(Punctuation::MinusEq) => MinusEq,
+    "`*=`" : Punctuation(Punctuation::MulEq) => MulEq,
+    "`/=`" : Punctuation(Punctuation::DivEq) => DivEq,
+    "`%=`" : Punctuation(Punctuation::ModEq) => ModEq,
+    "`<<`" : Punctuation(Punctuation::Shl) => Shl,
+    "`>>`" : Punctuation(Punctuation::Shr) => Shr,
+    "`,`"  : Punctuation(Punctuation::Comma) => Comma,
+    "`;`"  : Punctuation(Punctuation::Semicolon) => Semicolon,
+    "`:`"  : Punctuation(Punctuation::Colon) => Colon,
+    "`::`" : Punctuation(Punctuation::DoubleColon) => DoubleColon,
+    "`?`"  : Punctuation(Punctuation::Question) => Question,
 }
 
 //------ Keywords ------//

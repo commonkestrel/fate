@@ -14,7 +14,7 @@ use super::{
     parse::{Braced, Cursor, Parenthesized, Parsable, Punctuated},
     token::{
         Break, CloseBrace, CloseBracket, CloseParen, Colon, Comma, Continue, DoubleColon, Eq, Gt,
-        Ident, Mut, Semicolon,
+        Ident, Mut, OpenBrace, Semicolon,
     },
 };
 
@@ -32,7 +32,7 @@ pub enum Type {
         len: Box<Spanned<Expr>>,
     },
     Vector(Vec<Spanned<Type>>),
-    Composite(Ident),
+    Composite(Path),
     Err(Diagnostic),
 }
 
@@ -108,7 +108,61 @@ impl Parsable for Spanned<Type> {
 
                 Err(spanned_error!(span, "unmatched opening arrow"))
             }
-            Token::Ident(symbol) => Ok(Spanned::new(Type::Composite(Ident { symbol }), span)),
+            Token::Ident(_) => {
+                cursor.step_back();
+
+                let mut path_inner = Vec::new();
+                let mut last_ident: Option<Spanned<Ident>> = None;
+
+                while let Some(tok) = cursor.peek().cloned() {
+                    match tok.inner() {
+                        Token::Ident(_) => {
+                            if last_ident.is_some() {
+                                return Ok(Spanned::new(
+                                    Type::Err(spanned_error!(
+                                        tok.span().clone(),
+                                        "expected seperator, found duplicate ident"
+                                    )),
+                                    tok.span().clone(),
+                                ));
+                            }
+
+                            last_ident = Some(match cursor.parse() {
+                                Ok(ident) => ident,
+                                Err(err) => {
+                                    return Ok(Spanned::new(Type::Err(err), tok.into_span()))
+                                }
+                            });
+                        }
+                        Token::Punctuation(Punctuation::DoubleColon) => match last_ident.take() {
+                            Some(l) => path_inner.push((
+                                l,
+                                match cursor.parse() {
+                                    Ok(field) => field,
+                                    Err(err) => {
+                                        return Ok(Spanned::new(Type::Err(err), tok.into_span()))
+                                    }
+                                },
+                            )),
+                            None => {
+                                return Ok(Spanned::new(
+                                    Type::Err(spanned_error!(
+                                        tok.span().clone(),
+                                        "unexpected duplicate seperator"
+                                    )),
+                                    tok.into_span(),
+                                ))
+                            }
+                        },
+                        _ => break,
+                    }
+                }
+
+                let path = Punctuated::new(path_inner, last_ident);
+
+                let path_span = span.to(path.last().unwrap().span());
+                Ok(Spanned::new(Type::Composite(path), path_span))
+            }
             _ => Err(spanned_error!(
                 span,
                 "expected type, found {}",
@@ -124,7 +178,90 @@ impl Parsable for Spanned<Type> {
 
 #[derive(Debug, Clone)]
 struct Struct {
-    fields: Vec<(Spanned<Ident>, Spanned<Type>)>,
+    ident: Spanned<Ident>,
+    fields: Punctuated<FieldDef, Comma>,
+}
+
+impl Parsable for Spanned<Struct> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let open: Spanned<Token![struct]> = cursor.parse()?;
+        let ident: Spanned<Ident> = cursor.parse()?;
+        let _: OpenBrace = cursor.parse()?;
+
+        let fields = punctuated!(
+            cursor,
+            !Token::Delimeter(Delimeter::CloseBrace),
+            Token::Punctuation(Punctuation::Comma)
+        )?;
+
+        let close: Spanned<CloseBrace> = cursor.parse()?;
+
+        let struct_span = open.span().to(close.span());
+        Ok(Spanned::new(Struct { ident, fields }, struct_span))
+    }
+
+    fn description(&self) -> &'static str {
+        "struct definition"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Union {
+    ident: Spanned<Ident>,
+    fields: Punctuated<FieldDef, Comma>,
+}
+
+impl Parsable for Spanned<Union> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let open: Spanned<Token![union]> = cursor.parse()?;
+        let ident: Spanned<Ident> = cursor.parse()?;
+        let _: OpenBrace = cursor.parse()?;
+
+        let fields = punctuated!(
+            cursor,
+            !Token::Delimeter(Delimeter::CloseBrace),
+            Token::Punctuation(Punctuation::Comma)
+        )?;
+
+        let close: Spanned<CloseBrace> = cursor.parse()?;
+
+        let union_span = open.span().to(close.span());
+        Ok(Spanned::new(Union { ident, fields }, union_span))
+    }
+
+    fn description(&self) -> &'static str {
+        "union definition"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct FieldDef {
+    ident: Spanned<Ident>,
+    ty: Spanned<Type>,
+}
+
+impl Parsable for FieldDef {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let ident: Spanned<Ident> = cursor.parse()?;
+        let ty = if cursor.check(&Token::Punctuation(Punctuation::Colon)) {
+            cursor.step();
+            cursor.parse()?
+        } else {
+            Spanned::new(
+                Type::Err(spanned_error!(
+                    ident.span().clone(),
+                    "missing type for field"
+                )),
+                ident.span().clone(),
+            )
+        };
+
+        Ok(FieldDef { ident, ty })
+    }
+
+    fn description(&self) -> &'static str {
+        "field definition"
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -156,14 +293,118 @@ impl Parsable for Spanned<Field> {
 
 #[derive(Debug, Clone)]
 struct Enum {
-    variants: Vec<(Spanned<Ident>, Spanned<Variant>)>,
+    ident: Spanned<Ident>,
+    variants: Punctuated<Spanned<Variant>, Comma>,
 }
 
 #[derive(Debug, Clone)]
-enum Variant {
+struct Variant {
+    ident: Spanned<Ident>,
+    ty: VariantType,
+}
+
+impl Parsable for Spanned<Variant> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let ident: Spanned<Ident> = cursor.parse()?;
+        let ty: VariantType = cursor.parse()?;
+
+        let variant_span = match ty {
+            VariantType::Void | VariantType::Err(_) => ident.span().clone(),
+            VariantType::Vector(ref types) => ident.span().to(types.span()),
+            VariantType::Struct(ref fields) => ident.span().to(fields.span()),
+        };
+
+        Ok(Spanned::new(Variant { ident, ty }, variant_span))
+    }
+
+    fn description(&self) -> &'static str {
+        "enum variant"
+    }
+}
+
+#[derive(Debug, Clone)]
+enum VariantType {
     Void,
-    Struct(Struct),
-    Tuple(Vec<Type>),
+    Vector(Spanned<Punctuated<Spanned<Type>, Comma>>),
+    Struct(Spanned<Punctuated<FieldDef, Comma>>),
+    Err(Diagnostic),
+}
+
+impl Parsable for VariantType {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        match cursor.peek().map(Spanned::inner) {
+            Some(Token::Punctuation(Punctuation::Lt)) => {
+                let open: Spanned<Token![<]> = cursor.parse()?;
+
+                let mut types_inner = Vec::new();
+                let mut last_type = None;
+
+                while let Some(tok) = cursor.peek().cloned() {
+                    match tok.inner() {
+                        Token::Punctuation(Punctuation::Comma) => match last_type.take() {
+                            Some(l) => types_inner.push((
+                                l,
+                                match cursor.parse() {
+                                    Ok(field) => field,
+                                    Err(err) => return Ok(VariantType::Err(err)),
+                                },
+                            )),
+                            None => {
+                                return Ok(VariantType::Err(spanned_error!(
+                                    tok.span().clone(),
+                                    "unexpected duplicate seperator"
+                                )));
+                            }
+                        },
+                        Token::Punctuation(Punctuation::Gt) => break,
+                        _ => {
+                            if last_type.is_some() {
+                                return Ok(VariantType::Err(spanned_error!(
+                                    tok.span().clone(),
+                                    "expected seperator, found duplicate ident"
+                                )));
+                            }
+
+                            last_type = Some(match cursor.parse() {
+                                Ok(ident) => ident,
+                                Err(err) => return Ok(VariantType::Err(err)),
+                            });
+                        }
+                    }
+                }
+
+                let types = Punctuated::new(types_inner, last_type);
+
+                let close: Spanned<Token![>]> = cursor.parse()?;
+
+                Ok(VariantType::Vector(Spanned::new(
+                    types,
+                    open.span().to(close.span()),
+                )))
+            }
+            Some(Token::Delimeter(Delimeter::OpenBrace)) => {
+                let open: Spanned<OpenBrace> = cursor.parse()?;
+
+                let fields = punctuated!(
+                    cursor,
+                    !Token::Delimeter(Delimeter::CloseBrace),
+                    Token::Punctuation(Punctuation::Comma)
+                )?;
+
+                let close: Spanned<CloseBrace> = cursor.parse()?;
+
+                Ok(VariantType::Struct(Spanned::new(
+                    fields,
+                    open.span().to(close.span()),
+                )))
+            }
+            _ => Ok(VariantType::Void),
+        }
+    }
+
+    fn description(&self) -> &'static str {
+        "variant"
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -425,6 +666,58 @@ impl Expr {
                         expr_span,
                     );
                 }
+                Token::Punctuation(Punctuation::Lt) => {
+                    cursor.step();
+                    let b = Expr::parse_bitwise(cursor);
+                    let expr_span = a.span().to(b.span());
+                    a = Spanned::new(
+                        Expr::BinaryOp(BinOp::boxed(
+                            a,
+                            Spanned::new(BinaryOp::Lt, tok.span().clone()),
+                            b,
+                        )),
+                        expr_span,
+                    );
+                }
+                Token::Punctuation(Punctuation::Le) => {
+                    cursor.step();
+                    let b = Expr::parse_bitwise(cursor);
+                    let expr_span = a.span().to(b.span());
+                    a = Spanned::new(
+                        Expr::BinaryOp(BinOp::boxed(
+                            a,
+                            Spanned::new(BinaryOp::Le, tok.span().clone()),
+                            b,
+                        )),
+                        expr_span,
+                    );
+                }
+                Token::Punctuation(Punctuation::Gt) => {
+                    cursor.step();
+                    let b = Expr::parse_bitwise(cursor);
+                    let expr_span = a.span().to(b.span());
+                    a = Spanned::new(
+                        Expr::BinaryOp(BinOp::boxed(
+                            a,
+                            Spanned::new(BinaryOp::Gt, tok.span().clone()),
+                            b,
+                        )),
+                        expr_span,
+                    );
+                }
+                Token::Punctuation(Punctuation::Ge) => {
+                    cursor.step();
+                    let b = Expr::parse_bitwise(cursor);
+                    let expr_span = a.span().to(b.span());
+                    a = Spanned::new(
+                        Expr::BinaryOp(BinOp::boxed(
+                            a,
+                            Spanned::new(BinaryOp::Ge, tok.span().clone()),
+                            b,
+                        )),
+                        expr_span,
+                    );
+                }
                 _ => return a,
             }
         }
@@ -624,8 +917,6 @@ impl Expr {
     }
 
     fn parse_factor(cursor: &mut Cursor) -> Spanned<Self> {
-        println!("parse");
-
         let (tok, span) = match cursor.next() {
             Some(next) => next.deconstruct(),
             None => {
@@ -638,8 +929,6 @@ impl Expr {
                 )
             }
         };
-
-        spanned_debug!(span.clone(), "{tok:#?}").sync_emit();
 
         match tok {
             Token::Immediate(i) => Spanned::new(Expr::Immediate(i), span),
@@ -658,11 +947,11 @@ impl Expr {
                         return Spanned::new(Expr::Vector(components), vec_span);
                     }
 
-                    let ty = match cursor.parse() {
-                        Ok(ty) => ty,
+                    let expr = match cursor.parse() {
+                        Ok(expr) => expr,
                         Err(err) => return Spanned::new(Expr::Err(err), span),
                     };
-                    components.push(ty);
+                    components.push(expr);
                     if !cursor.check(&Token::Punctuation(Punctuation::Gt)) {
                         let _: Comma = match cursor.parse() {
                             Ok(comma) => comma,
@@ -745,8 +1034,6 @@ impl Expr {
                 )
             }
             Token::Ident(_) => {
-                debug!("ident").sync_emit();
-
                 cursor.step_back();
 
                 let mut path_inner = Vec::new();
@@ -796,8 +1083,6 @@ impl Expr {
 
                 let path = Punctuated::new(path_inner, last_ident);
 
-                debug!("after ident").sync_emit();
-
                 match cursor.peek().map(Spanned::inner) {
                     Some(Token::Delimeter(Delimeter::OpenBrace)) => {
                         cursor.step();
@@ -834,30 +1119,50 @@ impl Expr {
                             }
                         }
 
-                        let components = Punctuated::new(fields_inner, last_field);
+                        let fields = Punctuated::new(fields_inner, last_field);
                         let close: Spanned<CloseBrace> = match cursor.parse() {
                             Ok(field) => field,
                             Err(err) => return Spanned::new(Expr::Err(err), span),
                         };
 
                         Spanned::new(
-                            Expr::Constructor {
+                            Expr::NamedConstructor {
                                 ident: path,
-                                components,
+                                fields,
                             },
                             span.to(close.span()),
                         )
                     }
                     Some(Token::Punctuation(Punctuation::Lt)) => {
-                        debug!("lt").sync_emit();
+                        let open: Spanned<Token![<]> = cursor.parse().unwrap();
 
-                        cursor.step();
+                        let mut offset = 0;
+                        while let Some(tok) = cursor.peek_offset(offset) {
+                            
+
+                            offset += 1;
+                        }
+
                         let mut components_inner = Vec::new();
                         let mut last_component = None;
 
                         while let Some(tok) = cursor.peek() {
                             match tok.inner() {
-                                Token::Punctuation(Punctuation::Gt) => break,
+                                Token::Punctuation(Punctuation::Gt) => {
+                                    let components = Punctuated::new(components_inner, last_component);
+                                    let close: Spanned<Token![>]> = match cursor.parse() {
+                                        Ok(field) => field,
+                                        Err(err) => return Spanned::new(Expr::Err(err), span),
+                                    };
+
+                                    return Spanned::new(
+                                        Expr::Constructor {
+                                            ident: path,
+                                            components,
+                                        },
+                                        span.to(close.span()),
+                                    );
+                                },
                                 Token::Punctuation(Punctuation::Comma) => {
                                     match last_component.take() {
                                         Some(l) => {
@@ -884,23 +1189,12 @@ impl Expr {
                             }
                         }
 
-                        debug!("after components").sync_emit();
-
-                        let components = Punctuated::new(components_inner, last_component);
-                        let close: Spanned<Token![>]> = match cursor.parse() {
-                            Ok(field) => field,
-                            Err(err) => return Spanned::new(Expr::Err(err), span),
-                        };
-
-                        Spanned::new(
-                            Expr::Constructor {
-                                ident: path,
-                                components,
-                            },
-                            span.to(close.span()),
-                        )
+                        Spanned::new(Expr::Err(spanned_error!(open.span().clone(), "unmatched opening arrow")), open.span().clone())
                     }
-                    _ => Spanned::new(Expr::Reference(path), span),
+                    _ => {
+                        let path_span = span.to(path.last().unwrap().span());
+                        Spanned::new(Expr::Reference(path), path_span)
+                    }
                 }
             }
             _ => Spanned::new(
@@ -1123,8 +1417,6 @@ impl Parsable for Spanned<Statement> {
                         }
                     }
                 } else {
-                    debug!("no type").sync_emit();
-
                     Spanned::new(
                         Type::Err(spanned_error!(
                             ident.span().clone(),
@@ -1150,7 +1442,10 @@ impl Parsable for Spanned<Statement> {
             }
             Token::Delimeter(Delimeter::OpenBrace) => {
                 let mut statements = Vec::new();
+
                 while !cursor.at_end() {
+                    let peek = cursor.peek().unwrap();
+                    spanned_debug!(peek.span().clone(), "{:?}", peek.inner()).sync_emit();
                     if cursor.check(&Token::Delimeter(Delimeter::CloseBrace)) {
                         let close: Spanned<CloseBrace> = cursor.parse()?;
                         let block_span = span.to(close.span());
@@ -1159,6 +1454,9 @@ impl Parsable for Spanned<Statement> {
                     }
 
                     statements.push(cursor.parse()?);
+                    let mut errors = Vec::new();
+                    statements.iter().for_each(|s| s.bubble_errors(&mut errors));
+                    errors.into_iter().for_each(Diagnostic::sync_emit);
                     let _: Semicolon = cursor.parse()?;
                 }
 

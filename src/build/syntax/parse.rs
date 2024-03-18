@@ -59,7 +59,7 @@ impl<'a> Cursor<'a> {
     ) -> Self {
         let end_position = stream
             .last()
-            .map(|last| last.span().end() - 1..last.span().end())
+            .map(|last| last.span().end()..(last.span().end() + 1))
             .unwrap_or(0..1);
         Self {
             stream,
@@ -140,6 +140,10 @@ impl<'a> Iterator for Cursor<'a> {
         self.position += 1;
         ret.cloned()
     }
+}
+
+pub trait Bubble {
+    fn bubble_errors(&self, output: &mut Vec<Diagnostic>);
 }
 
 pub trait Parsable: Sized {
@@ -312,12 +316,9 @@ impl<T, S> Punctuated<T, S> {
         self.inner.len() + if self.last.is_some() { 1 } else { 0 }
     }
 
-    pub fn last(&self) -> Option<&T>
-    where
-        T: Deref<Target = T>,
-    {
-        self.last
-            .as_deref()
+    pub fn last(&self) -> Option<&T> {
+        (*self.last)
+            .as_ref()
             .or_else(|| self.inner.last().map(|both| &both.0))
     }
 
