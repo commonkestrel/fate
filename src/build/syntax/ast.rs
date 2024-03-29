@@ -421,7 +421,8 @@ pub enum Expr {
         ident: Path,
         fields: Punctuated<Spanned<Field>, Token![,]>,
     },
-    Vector(Vec<Spanned<Expr>>),
+    Vector(Punctuated<Spanned<Expr>, Token![,]>),
+    Dot(Box<(Spanned<Expr>, Spanned<Ident>)>),
     BinaryOp(Box<BinOp>),
     UnaryOp(Spanned<UnaryOp>, Box<Spanned<Expr>>),
     Cast(Spanned<Type>, Box<Spanned<Expr>>),
@@ -458,7 +459,8 @@ impl Expr {
             Expr::NamedConstructor { ident, fields } => fields
                 .values()
                 .for_each(|field| field.value.bubble_errors(output)),
-            Expr::Vector(exprs) => exprs.iter().for_each(|expr| expr.bubble_errors(output)),
+            Expr::Vector(exprs) => exprs.values().for_each(|expr| expr.bubble_errors(output)),
+            Expr::Dot(dot) => dot.as_ref().0.bubble_errors(output),
             Expr::BinaryOp(op) => {
                 op.left.bubble_errors(output);
                 op.right.bubble_errors(output);
@@ -821,6 +823,20 @@ impl Expr {
         // and stream is not mutable in any way
         while let Some(tok) = cursor.stream().get(cursor.position).cloned() {
             match tok.inner() {
+                Token::Punctuation(Punctuation::Dot) => {
+                    cursor.step();
+                    let b: Spanned<Ident> = match cursor.parse() {
+                        Ok(b) => b,
+                        Err(err) => return Spanned::new(Expr::Err(err), tok.into_span())
+                    };
+
+                    let expr_span = a.span().to(b.span());
+
+                    a = Spanned::new(
+                        Expr::Dot(Box::new((a, b))),
+                        expr_span,
+                    );
+                }
                 Token::Punctuation(Punctuation::Star) => {
                     cursor.step();
                     let b = Expr::parse_factor(cursor);
@@ -933,37 +949,55 @@ impl Expr {
         match tok {
             Token::Immediate(i) => Spanned::new(Expr::Immediate(i), span),
             Token::String(str) => Spanned::new(Expr::Str(str), span),
-            Token::Punctuation(Punctuation::Lt) => {
-                let mut components = Vec::new();
+            Token::Punctuation(Punctuation::Lt) => {                        
+                let mut vec_inner = match vector_inner(cursor, &span) {
+                    Ok(inner) => inner,
+                    Err(err) => return Spanned::new(Expr::Err(err), span),
+                };
 
-                while !cursor.at_end() {
-                    if cursor.check(&Token::Punctuation(Punctuation::Gt)) {
-                        let close: Spanned<Gt> = match cursor.parse() {
-                            Ok(gt) => gt,
-                            Err(err) => return Spanned::new(Expr::Err(err), span),
-                        };
-                        let vec_span = span.to(close.span());
+                debug!("{:?}", vec_inner.stream()).sync_emit();
 
-                        return Spanned::new(Expr::Vector(components), vec_span);
-                    }
+                let mut components_inner = Vec::new();
+                let mut last_component = None;
 
-                    let expr = match cursor.parse() {
-                        Ok(expr) => expr,
-                        Err(err) => return Spanned::new(Expr::Err(err), span),
-                    };
-                    components.push(expr);
-                    if !cursor.check(&Token::Punctuation(Punctuation::Gt)) {
-                        let _: Comma = match cursor.parse() {
-                            Ok(comma) => comma,
-                            Err(err) => return Spanned::new(Expr::Err(err), span),
-                        };
+                while let Some(tok) = vec_inner.peek() {
+                    match tok.inner() {
+                        Token::Punctuation(Punctuation::Gt) => {
+                            
+                        },
+                        Token::Punctuation(Punctuation::Comma) => {
+                            match last_component.take() {
+                                Some(l) => {
+                                    vec_inner.step();
+                                    components_inner.push((l, Token![,]));
+                                }
+                                None => {
+                                    return Spanned::new(
+                                        Expr::Err(spanned_error!(
+                                            span.clone(),
+                                            "unexpected duplicate seperator"
+                                        )),
+                                        span,
+                                    )
+                                }
+                            }
+                        }
+                        _ => {
+                            last_component = Some(match vec_inner.parse() {
+                                Ok(field) => field,
+                                Err(err) => return Spanned::new(Expr::Err(err), span),
+                            })
+                        }
                     }
                 }
 
-                Spanned::new(
-                    Expr::Err(spanned_error!(span.clone(), "unmatched opening arrow")),
-                    span,
-                )
+                let components = Punctuated::new(components_inner, last_component);
+                let close: Spanned<Token![>]> = match cursor.parse() {
+                    Ok(field) => field,
+                    Err(err) => return Spanned::new(Expr::Err(err), span),
+                };
+
+                Spanned::new(Expr::Vector(components), span.to(close.span()))
             }
             Token::Delimeter(Delimeter::OpenParen) => {
                 let a = Expr::parse_assignment(cursor);
@@ -1106,7 +1140,7 @@ impl Expr {
                                                 tok.span().clone(),
                                                 "unexpected duplicate seperator"
                                             )),
-                                            span,
+                                            tok.span().clone(),
                                         )
                                     }
                                 },
@@ -1135,38 +1169,26 @@ impl Expr {
                     }
                     Some(Token::Punctuation(Punctuation::Lt)) => {
                         let open: Spanned<Token![<]> = cursor.parse().unwrap();
+                        
+                        let mut vec_inner = match vector_inner(cursor, open.span()) {
+                            Ok(inner) => inner,
+                            Err(err) => return Spanned::new(Expr::Err(err), open.into_span()),
+                        };
 
-                        let mut offset = 0;
-                        while let Some(tok) = cursor.peek_offset(offset) {
-                            
-
-                            offset += 1;
-                        }
+                        debug!("{:?}", vec_inner.stream()).sync_emit();
 
                         let mut components_inner = Vec::new();
                         let mut last_component = None;
 
-                        while let Some(tok) = cursor.peek() {
+                        while let Some(tok) = vec_inner.peek() {
                             match tok.inner() {
                                 Token::Punctuation(Punctuation::Gt) => {
-                                    let components = Punctuated::new(components_inner, last_component);
-                                    let close: Spanned<Token![>]> = match cursor.parse() {
-                                        Ok(field) => field,
-                                        Err(err) => return Spanned::new(Expr::Err(err), span),
-                                    };
-
-                                    return Spanned::new(
-                                        Expr::Constructor {
-                                            ident: path,
-                                            components,
-                                        },
-                                        span.to(close.span()),
-                                    );
+                                    
                                 },
                                 Token::Punctuation(Punctuation::Comma) => {
                                     match last_component.take() {
                                         Some(l) => {
-                                            cursor.step();
+                                            vec_inner.step();
                                             components_inner.push((l, Token![,]));
                                         }
                                         None => {
@@ -1181,7 +1203,7 @@ impl Expr {
                                     }
                                 }
                                 _ => {
-                                    last_component = Some(match cursor.parse() {
+                                    last_component = Some(match vec_inner.parse() {
                                         Ok(field) => field,
                                         Err(err) => return Spanned::new(Expr::Err(err), span),
                                     })
@@ -1189,7 +1211,19 @@ impl Expr {
                             }
                         }
 
-                        Spanned::new(Expr::Err(spanned_error!(open.span().clone(), "unmatched opening arrow")), open.span().clone())
+                        let components = Punctuated::new(components_inner, last_component);
+                        let close: Spanned<Token![>]> = match cursor.parse() {
+                            Ok(field) => field,
+                            Err(err) => return Spanned::new(Expr::Err(err), span),
+                        };
+
+                        return Spanned::new(
+                            Expr::Constructor {
+                                ident: path,
+                                components,
+                            },
+                            span.to(close.span()),
+                        );
                     }
                     _ => {
                         let path_span = span.to(path.last().unwrap().span());
@@ -1207,6 +1241,51 @@ impl Expr {
             ),
         }
     }
+}
+
+fn vector_inner<'a>(cursor: &'a mut Cursor, open_span: &Span) -> Result<Cursor<'a>, Diagnostic> {
+    let mut offset = 0;
+    let mut depth = 0;
+    let mut prev_factor = false;
+
+    while let Some(tok) = cursor.peek_offset(offset) {
+        match tok.inner() {
+            Token::Delimeter(Delimeter::CloseParen)
+            | Token::Ident(_)
+            | Token::Immediate(_)
+            | Token::String(_) => prev_factor = true,
+            Token::Punctuation(Punctuation::Gt) => if !is_factor(cursor.peek_offset(offset+1).map(Spanned::inner)) {
+                if depth == 0 {
+                    spanned_debug!(tok.span().clone(), "vector end").sync_emit();
+                    cursor.position += offset;
+                    return Ok(cursor.slice((cursor.position - offset)..cursor.position));
+                }
+                depth -= 1;
+                prev_factor = false;
+            }
+            Token::Punctuation(Punctuation::Lt) => {
+                if !prev_factor {
+                    depth += 1;
+                }
+                prev_factor = false;
+            }
+            _ => prev_factor = false,
+        }
+
+        offset += 1;
+    }
+
+    Err(spanned_error!(open_span.clone(), "unmatched opening arrow"))
+}
+
+fn is_factor(tok: Option<&Token>) -> bool {
+    matches!(
+        tok,
+        Some(Token::Delimeter(Delimeter::OpenParen))
+        | Some(Token::Ident(_))
+        | Some(Token::Immediate(_))
+        | Some(Token::String(_))
+    )
 }
 
 #[derive(Debug, Clone, PartialEq)]
