@@ -312,6 +312,13 @@ impl<T, S> Punctuated<T, S> {
         }
     }
 
+    pub fn empty() -> Self {
+        Punctuated {
+            inner: Vec::new(),
+            last: Box::new(None),
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.inner.len() + if self.last.is_some() { 1 } else { 0 }
     }

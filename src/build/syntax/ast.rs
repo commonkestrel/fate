@@ -11,9 +11,9 @@ use crate::{
 
 use super::{
     lex::{self, Delimeter, Keyword, Punctuation, Token},
-    parse::{Braced, Cursor, Parenthesized, Parsable, Punctuated},
+    parse::{Cursor, Parenthesized, Parsable, Punctuated},
     token::{
-        Break, CloseBrace, CloseBracket, CloseParen, Colon, Comma, Continue, DoubleColon, Eq, Gt,
+        CloseBrace, CloseBracket, CloseParen, Colon, Comma, DoubleColon, Eq, Gt,
         Ident, Mut, OpenBrace, Semicolon,
     },
 };
@@ -179,6 +179,7 @@ impl Parsable for Spanned<Type> {
 #[derive(Debug, Clone)]
 struct Struct {
     ident: Spanned<Ident>,
+    implements: Punctuated<Path, Token![,]>,
     fields: Punctuated<FieldDef, Comma>,
 }
 
@@ -186,18 +187,39 @@ impl Parsable for Spanned<Struct> {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         let open: Spanned<Token![struct]> = cursor.parse()?;
         let ident: Spanned<Ident> = cursor.parse()?;
-        let _: OpenBrace = cursor.parse()?;
 
-        let fields = punctuated!(
-            cursor,
-            !Token::Delimeter(Delimeter::CloseBrace),
-            Token::Punctuation(Punctuation::Comma)
-        )?;
+        let implements = if cursor.check(&Token::Keyword(Keyword::Implements)) {
+            cursor.step();
 
-        let close: Spanned<CloseBrace> = cursor.parse()?;
+            punctuated!(
+                cursor,
+                !Token::Delimeter(Delimeter::OpenBrace) | Token::Punctuation(Punctuation::Semicolon),
+                Token::Punctuation(Punctuation::Comma)
+            )?
+        } else {
+            Punctuated::empty()
+        };
 
-        let struct_span = open.span().to(close.span());
-        Ok(Spanned::new(Struct { ident, fields }, struct_span))
+
+        let (fields, close) = if cursor.check(&Token::Punctuation(Punctuation::Semicolon)) {
+            let _: OpenBrace = cursor.parse()?;
+
+            let fields = punctuated!(
+                cursor,
+                !Token::Delimeter(Delimeter::CloseBrace),
+                Token::Punctuation(Punctuation::Comma)
+            )?;
+
+            let close = cursor.parse::<Spanned<CloseBrace>>()?.into_span();
+
+            (fields, close)
+        } else {
+            let close = cursor.parse::<Spanned<Token![;]>>()?.into_span();
+            (Punctuated::empty(), close)
+        };
+
+        let struct_span = open.span().to(&close);
+        Ok(Spanned::new(Struct { ident, implements, fields }, struct_span))
     }
 
     fn description(&self) -> &'static str {
@@ -1554,7 +1576,7 @@ impl Parsable for Spanned<Statement> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct ForHeader {
+pub struct ForHeader {
     init: Spanned<Expr>,
     check: Spanned<Expr>,
     post: Spanned<Expr>,

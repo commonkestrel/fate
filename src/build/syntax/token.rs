@@ -30,6 +30,7 @@ macro_rules! Token {
     [>>] => {$crate::build::syntax::token::Shr};
     [,] => {$crate::build::syntax::token::Comma};
     [:] => {$crate::build::syntax::token::Colon};
+    [;] => {$crate::build::syntax::token::Semicolon};
     [if] => {$crate::build::syntax::token::If};
     [else] => {$crate::build::syntax::token::Else};
     [use] => {$crate::build::syntax::token::Use};
