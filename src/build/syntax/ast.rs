@@ -201,11 +201,11 @@ impl Parsable for Spanned<Type> {
     }
 }
 
-#[derive(Debug, Clone)]
-struct Struct {
-    ident: Spanned<Ident>,
-    implements: Punctuated<Path, Token![,]>,
-    fields: Punctuated<FieldDef, Comma>,
+#[derive(Debug, Clone, PartialEq)]
+pub struct Struct {
+    pub ident: Spanned<Ident>,
+    pub implements: Punctuated<Path, Token![,]>,
+    pub fields: Punctuated<FieldDef, Comma>,
 }
 
 impl Parsable for Spanned<Struct> {
@@ -226,7 +226,7 @@ impl Parsable for Spanned<Struct> {
             Punctuated::empty()
         };
 
-        let (fields, close) = if cursor.check(&Token::Punctuation(Punctuation::Semicolon)) {
+        let (fields, close) = if cursor.check(&Token::Delimeter(Delimeter::OpenBrace)) {
             let _: OpenBrace = cursor.parse()?;
 
             let fields = punctuated!(
@@ -260,10 +260,10 @@ impl Parsable for Spanned<Struct> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct Union {
-    ident: Spanned<Ident>,
-    implements: Punctuated<Path, Token![,]>,
-    fields: Punctuated<FieldDef, Comma>,
+pub struct Union {
+    pub ident: Spanned<Ident>,
+    pub implements: Punctuated<Path, Token![,]>,
+    pub fields: Punctuated<FieldDef, Comma>,
 }
 
 impl Parsable for Spanned<Union> {
@@ -284,7 +284,7 @@ impl Parsable for Spanned<Union> {
             Punctuated::empty()
         };
 
-        let (fields, close) = if cursor.check(&Token::Punctuation(Punctuation::Semicolon)) {
+        let (fields, close) = if cursor.check(&Token::Delimeter(Delimeter::OpenBrace)) {
             let _: OpenBrace = cursor.parse()?;
 
             let fields = punctuated!(
@@ -317,14 +317,37 @@ impl Parsable for Spanned<Union> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Visibility {
+    Public,
+    Private,
+}
+
+impl Parsable for Visibility {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        if cursor.check(&Token::Keyword(Keyword::Pub)) {
+            cursor.step();
+            Ok(Visibility::Public)
+        } else {
+            Ok(Visibility::Private)
+        }
+    }
+
+    fn description(&self) -> &'static str {
+        "visibility modifier"
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
-struct FieldDef {
-    ident: Spanned<Ident>,
-    ty: Spanned<Type>,
+pub struct FieldDef {
+    pub vis: Visibility,
+    pub ident: Spanned<Ident>,
+    pub ty: Spanned<Type>,
 }
 
 impl Parsable for FieldDef {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let vis = cursor.parse()?;
         let ident: Spanned<Ident> = cursor.parse()?;
         let ty = if cursor.check(&Token::Punctuation(Punctuation::Colon)) {
             cursor.step();
@@ -339,7 +362,7 @@ impl Parsable for FieldDef {
             )
         };
 
-        Ok(FieldDef { ident, ty })
+        Ok(FieldDef { ident, vis, ty })
     }
 
     fn description(&self) -> &'static str {
@@ -348,7 +371,7 @@ impl Parsable for FieldDef {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct Field {
+pub struct Field {
     ident: Ident,
     value: Expr,
 }
@@ -374,16 +397,37 @@ impl Parsable for Spanned<Field> {
     }
 }
 
-#[derive(Debug, Clone)]
-struct Enum {
-    ident: Spanned<Ident>,
-    variants: Punctuated<Spanned<Variant>, Comma>,
+#[derive(Debug, Clone, PartialEq)]
+pub struct Enum {
+    pub ident: Spanned<Ident>,
+    pub variants: Punctuated<Spanned<Variant>, Comma>,
 }
 
-#[derive(Debug, Clone)]
-struct Variant {
-    ident: Spanned<Ident>,
-    ty: VariantType,
+impl Parsable for Spanned<Enum> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let open: Spanned<Token![enum]> = cursor.parse()?;
+        let ident = cursor.parse()?;
+        let _: OpenBrace = cursor.parse()?;
+        let variants = punctuated!(
+            cursor,
+            !Token::Delimeter(Delimeter::CloseBrace),
+            Token::Punctuation(Punctuation::Comma)
+        )?;
+
+        let close: Spanned<CloseBrace> = cursor.parse()?;
+
+        Ok(Spanned::new(Enum{ident, variants}, open.span().to(close.span())))
+    }
+
+    fn description(&self) -> &'static str {
+        "enum definition"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Variant {
+    pub ident: Spanned<Ident>,
+    pub ty: VariantType,
 }
 
 impl Parsable for Spanned<Variant> {
@@ -405,12 +449,20 @@ impl Parsable for Spanned<Variant> {
     }
 }
 
-#[derive(Debug, Clone)]
-enum VariantType {
+#[derive(Debug, Clone, PartialEq)]
+pub enum VariantType {
     Void,
     Vector(Spanned<Punctuated<Spanned<Type>, Comma>>),
     Struct(Spanned<Punctuated<FieldDef, Comma>>),
     Err(Diagnostic),
+}
+
+impl VariantType {
+    pub fn bubble_errors(&self, output: &mut Vec<Diagnostic>) {
+        if let VariantType::Err(ref err) = self {
+            output.push(err.clone());
+        }
+    }
 }
 
 impl Parsable for VariantType {
@@ -487,6 +539,52 @@ impl Parsable for VariantType {
 
     fn description(&self) -> &'static str {
         "variant"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Static {
+    pub vis: Visibility,
+    pub ident: Spanned<Ident>,
+    pub value: Spanned<Expr>,
+}
+
+impl Parsable for Spanned<Static> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let open: Spanned<Token![static]> = cursor.parse()?;
+        let vis = cursor.parse()?;
+        let ident = cursor.parse()?;
+
+        let _: Token![=] = cursor.parse()?;
+        
+        let value = cursor.parse()?;
+
+        let close: Spanned<Token![;]> = cursor.parse()?;
+
+        Ok(Spanned::new(Static {vis, ident, value}, open.span().to(close.span())))
+    }
+
+    fn description(&self) -> &'static str {
+        "static"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Use {
+    reference: Path,
+}
+
+impl Parsable for Spanned<Use> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let open: Spanned<Token![use]> = cursor.parse()?;
+        let reference = cursor.parse()?;
+        let close: Spanned<Token![;]> = cursor.parse()?;
+
+        Ok(Spanned::new(Use{reference}, open.span().to(close.span())))
+    }
+
+    fn description(&self) -> &'static str {
+        "use statement"
     }
 }
 
@@ -1414,7 +1512,7 @@ pub enum UnaryOp {
     Addr(Mutability),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Expr(Expr),
     Block(Vec<Spanned<Statement>>),
@@ -1658,12 +1756,20 @@ impl Parsable for Mutability {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FnDefinition {
     pub ident: Spanned<Ident>,
     pub parameters: Parenthesized<Punctuated<FnParam, Comma>>,
     pub return_type: Spanned<Type>,
     pub body: Spanned<Statement>,
+}
+
+impl FnDefinition {
+    pub fn bubble_errors(&self, output: &mut Vec<Diagnostic>) {
+        self.parameters.inner().values().for_each(|param| param.bubble_errors(output));
+        self.return_type.bubble_errors(output);
+        self.body.bubble_errors(output);
+    }
 }
 
 impl Parsable for Spanned<FnDefinition> {
@@ -1702,11 +1808,17 @@ impl Parsable for Spanned<FnDefinition> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FnParam {
     pub mutability: Mutability,
     pub ident: Spanned<Ident>,
     pub ty: Spanned<Type>,
+}
+
+impl FnParam {
+    pub fn bubble_errors(&self, output: &mut Vec<Diagnostic>) {
+        self.ty.bubble_errors(output);
+    }
 }
 
 impl Parsable for FnParam {

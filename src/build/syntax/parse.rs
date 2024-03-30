@@ -1,34 +1,9 @@
 use std::{
-    collections::HashMap,
-    ops::{Deref, Range, RangeBounds, RangeInclusive},
-    slice::SliceIndex,
-    sync::Arc,
+    collections::HashMap, ops::{Deref, Range, RangeBounds, RangeInclusive}, path::PathBuf, slice::SliceIndex, sync::Arc
 };
 
-use async_std::path::PathBuf;
-use indexmap::IndexMap;
-
-pub fn parse_functions(
-    mut stream: TokenStream,
-    source_name: Arc<String>,
-    lookup: Arc<Lookup>,
-) -> Result<Vec<Spanned<FnDefinition>>, Diagnostic> {
-    let mut cursor = Cursor::new(&mut stream, source_name, lookup);
-    let mut functions = Vec::new();
-
-    while !cursor.at_end() {
-        if cursor.check(&Token::Keyword(Keyword::Fn)) {
-            functions.push(cursor.parse()?);
-        } else {
-            cursor.step();
-        }
-    }
-
-    Ok(functions)
-}
-
 use super::{
-    ast::{Expr, FnDefinition},
+    ast::{Enum, Expr, FnDefinition, Static, Struct, Union, Use, Visibility},
     lex::{self, Delimeter, Keyword, Punctuation, Token, TokenStream},
     token::{
         Break, CloseBrace, CloseBracket, CloseParen, Comma, Continue, DoubleColon, Eq, For, Gt,
@@ -40,9 +15,102 @@ use crate::{
     error,
     span::{Lookup, Span, Spanned},
     spanned_error,
+    spanned_debug,
 };
 
-pub fn parse<L>(stream: TokenStream) {}
+pub fn parse(stream: TokenStream, home: PathBuf, source_name: Arc<String>, lookup: Arc<Lookup>) -> Result<Namespace, Vec<Diagnostic>> {
+    let mut cursor = Cursor::new(&stream, source_name, lookup);
+    let mut errors = Vec::new();
+    let mut namespace = Namespace::empty(home);
+    let mut visibility = Visibility::Private;
+
+    while let Some(tok) = cursor.peek() {
+        spanned_debug!(tok.span().clone(), "").sync_emit();
+        match tok.inner() {
+            Token::Keyword(Keyword::Fn) => namespace.functions.push(match cursor.parse() {
+                Ok(func) => {
+                    let ret = (func, visibility);
+                    visibility = Visibility::Private;
+                    ret
+                },
+                Err(err) => {
+                    errors.push(err);
+                    continue;
+                }
+            }),
+            Token::Keyword(Keyword::Static) => namespace.statics.push(match cursor.parse() {
+                Ok(stat) => {
+                    let ret = (stat, visibility);
+                    visibility = Visibility::Private;
+                    ret
+                },
+                Err(err) => {
+                    errors.push(err);
+                    continue;
+                }
+            }),
+            Token::Keyword(Keyword::Struct) => namespace.structs.push(match cursor.parse() {
+                Ok(struc) => {
+                    let ret = (struc, visibility);
+                    visibility = Visibility::Private;
+                    ret
+                },
+                Err(err) => {
+                    errors.push(err);
+                    continue;
+                }
+            }),
+            Token::Keyword(Keyword::Union) => namespace.unions.push(match cursor.parse() {
+                Ok(un) => {
+                    let ret = (un, visibility);
+                    visibility = Visibility::Private;
+                    ret
+                },
+                Err(err) => {
+                    errors.push(err);
+                    continue;
+                }
+            }),
+            Token::Keyword(Keyword::Enum) => namespace.enums.push(match cursor.parse() {
+                Ok(en) => {
+                    let ret = (en, visibility);
+                    visibility = Visibility::Private;
+                    ret
+                },
+                Err(err) => {
+                    errors.push(err);
+                    continue;
+                }
+            }),
+            Token::Keyword(Keyword::Use) => namespace.imports.push(match cursor.parse() {
+                Ok(import) => {
+                    let ret = (import, visibility);
+                    visibility = Visibility::Private;
+                    ret
+                },
+                Err(err) => {
+                    errors.push(err);
+                    continue;
+                }
+            }),
+            Token::Keyword(Keyword::Pub) => {
+                cursor.step();
+                visibility = Visibility::Public;
+            }
+            _ => {
+                errors.push(spanned_error!(tok.span().clone(), "unexpected {} in top level section", tok.description()));
+                cursor.step();
+            },
+        }
+    }
+
+    namespace.bubble_errors(&mut errors);
+    if errors.is_empty() {
+        Ok(namespace)
+    } else {
+        Err(errors)
+    }
+}
 
 pub struct Cursor<'a> {
     stream: &'a [Spanned<Token>],
@@ -414,9 +482,36 @@ macro_rules! punctuated {
     }};
 }
 
-struct Namespace {
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Namespace {
     home: PathBuf,
-    // constants: HashMap<String, Constant>,
+    imports: Vec<(Spanned<Use>, Visibility)>,
+    statics: Vec<(Spanned<Static>, Visibility)>,
+    structs: Vec<(Spanned<Struct>, Visibility)>,
+    unions: Vec<(Spanned<Union>, Visibility)>,
+    enums: Vec<(Spanned<Enum>, Visibility)>,
+    functions: Vec<(Spanned<FnDefinition>, Visibility)>,
 }
 
-enum Instruction {}
+impl Namespace {
+    fn empty(home: PathBuf) -> Self {
+        Namespace {
+            home,
+            imports: Vec::new(),
+            statics: Vec::new(),
+            structs: Vec::new(),
+            unions: Vec::new(),
+            enums: Vec::new(),
+            functions: Vec::new(),
+        }
+    }
+
+    fn bubble_errors(&self, output: &mut Vec<Diagnostic>) {
+        self.statics.iter().for_each(|st| st.0.value.bubble_errors(output));
+        self.structs.iter().for_each(|st| st.0.fields.values().for_each(|def| def.ty.bubble_errors(output)));
+        self.unions.iter().for_each(|un| un.0.fields.values().for_each(|def| def.ty.bubble_errors(output)));
+        self.enums.iter().for_each(|en| en.0.variants.values().for_each(|var| var.ty.bubble_errors(output)));
+        self.functions.iter().for_each(|fu| fu.0.bubble_errors(output));
+    }
+}
