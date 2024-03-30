@@ -13,12 +13,37 @@ use super::{
     lex::{self, Delimeter, Keyword, Punctuation, Token},
     parse::{Cursor, Parenthesized, Parsable, Punctuated},
     token::{
-        CloseBrace, CloseBracket, CloseParen, Colon, Comma, DoubleColon, Eq, Gt,
-        Ident, Mut, OpenBrace, Semicolon,
+        CloseBrace, CloseBracket, CloseParen, Colon, Comma, DoubleColon, Eq, Gt, Ident, Mut,
+        OpenBrace, Semicolon,
     },
 };
 
-pub type Path = Punctuated<Spanned<Ident>, DoubleColon>;
+#[derive(Debug, Clone, PartialEq)]
+pub struct Path {
+    inner: Punctuated<Spanned<Ident>, DoubleColon>,
+}
+
+impl Parsable for Path {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let inner = punctuated!(
+            cursor,
+            Token::Ident(_),
+            Token::Punctuation(Punctuation::DoubleColon)
+        )?;
+
+        Ok(Path { inner })
+    }
+
+    fn description(&self) -> &'static str {
+        "path"
+    }
+}
+
+impl From<Punctuated<Spanned<Ident>, DoubleColon>> for Path {
+    fn from(value: Punctuated<Spanned<Ident>, DoubleColon>) -> Self {
+        Path { inner: value }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -161,7 +186,7 @@ impl Parsable for Spanned<Type> {
                 let path = Punctuated::new(path_inner, last_ident);
 
                 let path_span = span.to(path.last().unwrap().span());
-                Ok(Spanned::new(Type::Composite(path), path_span))
+                Ok(Spanned::new(Type::Composite(path.into()), path_span))
             }
             _ => Err(spanned_error!(
                 span,
@@ -193,13 +218,13 @@ impl Parsable for Spanned<Struct> {
 
             punctuated!(
                 cursor,
-                !Token::Delimeter(Delimeter::OpenBrace) | Token::Punctuation(Punctuation::Semicolon),
+                !Token::Delimeter(Delimeter::OpenBrace)
+                    | Token::Punctuation(Punctuation::Semicolon),
                 Token::Punctuation(Punctuation::Comma)
             )?
         } else {
             Punctuated::empty()
         };
-
 
         let (fields, close) = if cursor.check(&Token::Punctuation(Punctuation::Semicolon)) {
             let _: OpenBrace = cursor.parse()?;
@@ -219,7 +244,14 @@ impl Parsable for Spanned<Struct> {
         };
 
         let struct_span = open.span().to(&close);
-        Ok(Spanned::new(Struct { ident, implements, fields }, struct_span))
+        Ok(Spanned::new(
+            Struct {
+                ident,
+                implements,
+                fields,
+            },
+            struct_span,
+        ))
     }
 
     fn description(&self) -> &'static str {
@@ -230,6 +262,7 @@ impl Parsable for Spanned<Struct> {
 #[derive(Debug, Clone, PartialEq)]
 struct Union {
     ident: Spanned<Ident>,
+    implements: Punctuated<Path, Token![,]>,
     fields: Punctuated<FieldDef, Comma>,
 }
 
@@ -237,18 +270,46 @@ impl Parsable for Spanned<Union> {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         let open: Spanned<Token![union]> = cursor.parse()?;
         let ident: Spanned<Ident> = cursor.parse()?;
-        let _: OpenBrace = cursor.parse()?;
 
-        let fields = punctuated!(
-            cursor,
-            !Token::Delimeter(Delimeter::CloseBrace),
-            Token::Punctuation(Punctuation::Comma)
-        )?;
+        let implements = if cursor.check(&Token::Keyword(Keyword::Implements)) {
+            cursor.step();
 
-        let close: Spanned<CloseBrace> = cursor.parse()?;
+            punctuated!(
+                cursor,
+                !Token::Delimeter(Delimeter::OpenBrace)
+                    | Token::Punctuation(Punctuation::Semicolon),
+                Token::Punctuation(Punctuation::Comma)
+            )?
+        } else {
+            Punctuated::empty()
+        };
 
-        let union_span = open.span().to(close.span());
-        Ok(Spanned::new(Union { ident, fields }, union_span))
+        let (fields, close) = if cursor.check(&Token::Punctuation(Punctuation::Semicolon)) {
+            let _: OpenBrace = cursor.parse()?;
+
+            let fields = punctuated!(
+                cursor,
+                !Token::Delimeter(Delimeter::CloseBrace),
+                Token::Punctuation(Punctuation::Comma)
+            )?;
+
+            let close = cursor.parse::<Spanned<CloseBrace>>()?.into_span();
+
+            (fields, close)
+        } else {
+            let close = cursor.parse::<Spanned<Token![;]>>()?.into_span();
+            (Punctuated::empty(), close)
+        };
+
+        let union_span = open.span().to(&close);
+        Ok(Spanned::new(
+            Union {
+                ident,
+                implements,
+                fields,
+            },
+            union_span,
+        ))
     }
 
     fn description(&self) -> &'static str {
@@ -849,15 +910,12 @@ impl Expr {
                     cursor.step();
                     let b: Spanned<Ident> = match cursor.parse() {
                         Ok(b) => b,
-                        Err(err) => return Spanned::new(Expr::Err(err), tok.into_span())
+                        Err(err) => return Spanned::new(Expr::Err(err), tok.into_span()),
                     };
 
                     let expr_span = a.span().to(b.span());
 
-                    a = Spanned::new(
-                        Expr::Dot(Box::new((a, b))),
-                        expr_span,
-                    );
+                    a = Spanned::new(Expr::Dot(Box::new((a, b))), expr_span);
                 }
                 Token::Punctuation(Punctuation::Star) => {
                     cursor.step();
@@ -971,7 +1029,7 @@ impl Expr {
         match tok {
             Token::Immediate(i) => Spanned::new(Expr::Immediate(i), span),
             Token::String(str) => Spanned::new(Expr::Str(str), span),
-            Token::Punctuation(Punctuation::Lt) => {                        
+            Token::Punctuation(Punctuation::Lt) => {
                 let mut vec_inner = match vector_inner(cursor, &span) {
                     Ok(inner) => inner,
                     Err(err) => return Spanned::new(Expr::Err(err), span),
@@ -984,26 +1042,22 @@ impl Expr {
 
                 while let Some(tok) = vec_inner.peek() {
                     match tok.inner() {
-                        Token::Punctuation(Punctuation::Gt) => {
-                            
-                        },
-                        Token::Punctuation(Punctuation::Comma) => {
-                            match last_component.take() {
-                                Some(l) => {
-                                    vec_inner.step();
-                                    components_inner.push((l, Token![,]));
-                                }
-                                None => {
-                                    return Spanned::new(
-                                        Expr::Err(spanned_error!(
-                                            span.clone(),
-                                            "unexpected duplicate seperator"
-                                        )),
-                                        span,
-                                    )
-                                }
+                        Token::Punctuation(Punctuation::Gt) => {}
+                        Token::Punctuation(Punctuation::Comma) => match last_component.take() {
+                            Some(l) => {
+                                vec_inner.step();
+                                components_inner.push((l, Token![,]));
                             }
-                        }
+                            None => {
+                                return Spanned::new(
+                                    Expr::Err(spanned_error!(
+                                        span.clone(),
+                                        "unexpected duplicate seperator"
+                                    )),
+                                    span,
+                                )
+                            }
+                        },
                         _ => {
                             last_component = Some(match vec_inner.parse() {
                                 Ok(field) => field,
@@ -1093,7 +1147,7 @@ impl Expr {
                 cursor.step_back();
 
                 let mut path_inner = Vec::new();
-                let mut last_ident = None;
+                let mut last_ident: Option<Spanned<Ident>> = None;
 
                 while let Some(tok) = cursor.peek().cloned() {
                     match tok.inner() {
@@ -1183,7 +1237,7 @@ impl Expr {
 
                         Spanned::new(
                             Expr::NamedConstructor {
-                                ident: path,
+                                ident: path.into(),
                                 fields,
                             },
                             span.to(close.span()),
@@ -1191,7 +1245,7 @@ impl Expr {
                     }
                     Some(Token::Punctuation(Punctuation::Lt)) => {
                         let open: Spanned<Token![<]> = cursor.parse().unwrap();
-                        
+
                         let mut vec_inner = match vector_inner(cursor, open.span()) {
                             Ok(inner) => inner,
                             Err(err) => return Spanned::new(Expr::Err(err), open.into_span()),
@@ -1204,9 +1258,7 @@ impl Expr {
 
                         while let Some(tok) = vec_inner.peek() {
                             match tok.inner() {
-                                Token::Punctuation(Punctuation::Gt) => {
-                                    
-                                },
+                                Token::Punctuation(Punctuation::Gt) => {}
                                 Token::Punctuation(Punctuation::Comma) => {
                                     match last_component.take() {
                                         Some(l) => {
@@ -1241,7 +1293,7 @@ impl Expr {
 
                         return Spanned::new(
                             Expr::Constructor {
-                                ident: path,
+                                ident: path.into(),
                                 components,
                             },
                             span.to(close.span()),
@@ -1249,7 +1301,7 @@ impl Expr {
                     }
                     _ => {
                         let path_span = span.to(path.last().unwrap().span());
-                        Spanned::new(Expr::Reference(path), path_span)
+                        Spanned::new(Expr::Reference(path.into()), path_span)
                     }
                 }
             }
@@ -1276,14 +1328,16 @@ fn vector_inner<'a>(cursor: &'a mut Cursor, open_span: &Span) -> Result<Cursor<'
             | Token::Ident(_)
             | Token::Immediate(_)
             | Token::String(_) => prev_factor = true,
-            Token::Punctuation(Punctuation::Gt) => if !is_factor(cursor.peek_offset(offset+1).map(Spanned::inner)) {
-                if depth == 0 {
-                    spanned_debug!(tok.span().clone(), "vector end").sync_emit();
-                    cursor.position += offset;
-                    return Ok(cursor.slice((cursor.position - offset)..cursor.position));
+            Token::Punctuation(Punctuation::Gt) => {
+                if !is_factor(cursor.peek_offset(offset + 1).map(Spanned::inner)) {
+                    if depth == 0 {
+                        spanned_debug!(tok.span().clone(), "vector end").sync_emit();
+                        cursor.position += offset;
+                        return Ok(cursor.slice((cursor.position - offset)..cursor.position));
+                    }
+                    depth -= 1;
+                    prev_factor = false;
                 }
-                depth -= 1;
-                prev_factor = false;
             }
             Token::Punctuation(Punctuation::Lt) => {
                 if !prev_factor {
@@ -1304,9 +1358,9 @@ fn is_factor(tok: Option<&Token>) -> bool {
     matches!(
         tok,
         Some(Token::Delimeter(Delimeter::OpenParen))
-        | Some(Token::Ident(_))
-        | Some(Token::Immediate(_))
-        | Some(Token::String(_))
+            | Some(Token::Ident(_))
+            | Some(Token::Immediate(_))
+            | Some(Token::String(_))
     )
 }
 
@@ -1708,11 +1762,7 @@ pub struct FnCall {
 
 impl Parsable for FnCall {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
-        let path = punctuated!(
-            cursor,
-            Token::Ident(_),
-            Token::Punctuation(Punctuation::DoubleColon)
-        )?;
+        let path = cursor.parse()?;
         let parameters = cursor.parse()?;
 
         Ok(Self { path, parameters })
