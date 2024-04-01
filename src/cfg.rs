@@ -37,6 +37,7 @@ impl Config {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Project {
     pub name: String,
+    pub description: Option<String>,
     pub version: Version,
     pub authors: Option<Vec<String>>,
     #[serde(rename = "type")]
