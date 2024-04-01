@@ -13,8 +13,7 @@ use super::{
     lex::{self, Delimeter, Keyword, Punctuation, Token},
     parse::{Cursor, Parenthesized, Parsable, Punctuated},
     token::{
-        CloseBrace, CloseBracket, CloseParen, Colon, Comma, DoubleColon, Eq, Gt, Ident, Mut,
-        OpenBrace, Semicolon,
+        CloseBrace, CloseBracket, CloseParen, Colon, Comma, DoubleColon, Eq, Gt, Ident, LowerSelf, Mut, OpenBrace, Semicolon
     },
 };
 
@@ -58,12 +57,14 @@ pub enum Type {
     },
     Vector(Vec<Spanned<Type>>),
     Composite(Path),
+    BigSelf,
     Err(Diagnostic),
 }
 
 impl Type {
     pub fn bubble_errors(&self, output: &mut Vec<Diagnostic>) {
         match self {
+            Type::BigSelf => {}
             Type::Primitive(_) => {}
             Type::Composite(_) => {}
             Type::Vector(types) => types.iter().for_each(|ty| ty.bubble_errors(output)),
@@ -206,6 +207,7 @@ pub struct Struct {
     pub ident: Spanned<Ident>,
     pub implements: Punctuated<Path, Token![,]>,
     pub fields: Punctuated<FieldDef, Comma>,
+    pub methods: Vec<Spanned<Method>>,
 }
 
 impl Parsable for Spanned<Struct> {
@@ -226,21 +228,34 @@ impl Parsable for Spanned<Struct> {
             Punctuated::empty()
         };
 
-        let (fields, close) = if cursor.check(&Token::Delimeter(Delimeter::OpenBrace)) {
+        let (fields, methods, close) = if cursor.check(&Token::Delimeter(Delimeter::OpenBrace)) {
             let _: OpenBrace = cursor.parse()?;
 
-            let fields = punctuated!(
-                cursor,
-                !Token::Delimeter(Delimeter::CloseBrace),
-                Token::Punctuation(Punctuation::Comma)
-            )?;
+            let mut fields_inner = Vec::new();
+            let mut fields_last: Option<FieldDef> = None;
+            let mut methods = Vec::new();
+
+            while !cursor.at_end() {
+                if cursor.check(&Token::Delimeter(Delimeter::CloseBrace)) {
+                    break;
+                } else if cursor.check(&Token::Keyword(Keyword::Fn)) || (cursor.check(&Token::Keyword(Keyword::Pub)) && cursor.check2(&Token::Keyword(Keyword::Fn))) {
+                    methods.push(cursor.parse()?);
+                } else {
+                    let field: FieldDef = cursor.parse()?;
+                    if cursor.check(&Token::Delimeter(Delimeter::CloseBrace)) {
+                        fields_last = Some(field);
+                    } else {
+                        fields_inner.push((field, cursor.parse()?))
+                    }
+                }
+            }
 
             let close = cursor.parse::<Spanned<CloseBrace>>()?.into_span();
 
-            (fields, close)
+            (Punctuated::new(fields_inner, fields_last), methods, close)
         } else {
             let close = cursor.parse::<Spanned<Token![;]>>()?.into_span();
-            (Punctuated::empty(), close)
+            (Punctuated::empty(), Vec::new(), close)
         };
 
         let struct_span = open.span().to(&close);
@@ -249,6 +264,7 @@ impl Parsable for Spanned<Struct> {
                 ident,
                 implements,
                 fields,
+                methods,
             },
             struct_span,
         ))
@@ -593,6 +609,7 @@ pub enum Expr {
     Immediate(i64),
     Str(AsciiStr),
     Reference(Path),
+    SelfVar,
     Call(Box<Spanned<Expr>>, Punctuated<Spanned<Expr>, Token![,]>),
     Constructor {
         ident: Path,
@@ -627,6 +644,7 @@ impl Expr {
             Expr::Immediate(_) => {}
             Expr::Reference(_) => {}
             Expr::Str(_) => {}
+            Expr::SelfVar => {}
             Expr::Cast(_, expr) => expr.bubble_errors(output),
             Expr::Call(expr, params) => {
                 expr.bubble_errors(output);
@@ -1127,6 +1145,7 @@ impl Expr {
         match tok {
             Token::Immediate(i) => Spanned::new(Expr::Immediate(i), span),
             Token::String(str) => Spanned::new(Expr::Str(str), span),
+            Token::Keyword(Keyword::LowerSelf) => Spanned::new(Expr::SelfVar, span),
             Token::Punctuation(Punctuation::Lt) => {
                 let mut vec_inner = match vector_inner(cursor, &span) {
                     Ok(inner) => inner,
@@ -1776,7 +1795,7 @@ impl Parsable for Spanned<FnDefinition> {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         let open: Spanned<Token![fn]> = cursor.parse()?;
         let ident: Spanned<Ident> = cursor.parse()?;
-        let parameters = cursor.parse()?;
+        let parameters: Parenthesized<Punctuated<FnParam, Comma>> = cursor.parse()?;
 
         let return_type = if cursor.check(&Token::Punctuation(Punctuation::Colon)) {
             cursor.step();
@@ -1806,6 +1825,91 @@ impl Parsable for Spanned<FnDefinition> {
     fn description(&self) -> &'static str {
         "function definition"
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Method {
+    pub vis: Visibility,
+    pub ident: Spanned<Ident>,
+    pub parameters: Parenthesized<Punctuated<Spanned<MethodParam>, Token![,]>>,
+    pub return_type: Spanned<Type>,
+    pub implements: Option<Path>,
+    pub body: Spanned<Statement>,
+}
+
+impl Parsable for Spanned<Method> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let vis: Visibility = cursor.parse()?;
+        let open: Spanned<Token![fn]> = cursor.parse()?;
+        let ident: Spanned<Ident> = cursor.parse()?;
+        let parameters = cursor.parse()?;
+
+        let _: Token![:] = cursor.parse()?;
+        let return_type = cursor.parse()?;
+
+        let implements = if cursor.check(&Token::Keyword(Keyword::Implements)) {
+            cursor.step();
+            Some(cursor.parse()?)
+        } else {
+            None
+        };
+
+        let body: Spanned<Statement> = cursor.parse()?;
+
+        let method_span = open.span().to(body.span());
+        Ok(Spanned::new(
+            Method {vis, ident, parameters, return_type, implements, body},
+            method_span
+        ))
+    }
+
+    fn description(&self) -> &'static str {
+        "method"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MethodParam {
+    SelfParam {
+        mutability: Mutability,
+        ty: SelfParam,
+    },
+    FnParam(FnParam),
+}
+
+impl Parsable for Spanned<MethodParam> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        if cursor.check(&Token::Keyword(Keyword::LowerSelf)) {
+            let s: Spanned<Token![self]> = cursor.parse()?;
+            Ok(Spanned::new(MethodParam::SelfParam{mutability: Mutability::Const, ty: SelfParam::Value}, s.into_span()))
+        }  else if cursor.check(&Token::Punctuation(Punctuation::Star)) {
+            let open: Spanned<Token![*]> = cursor.parse()?;
+            let mutability: Mutability = cursor.parse()?;
+            let s: Spanned<Token![self]> = cursor.parse()?;
+            
+            let param_span = open.span().to(s.span());
+            Ok(Spanned::new(MethodParam::SelfParam{mutability, ty: SelfParam::Reference}, param_span))
+        } else if cursor.check(&Token::Keyword(Keyword::Mut)) && cursor.check2(&Token::Keyword(Keyword::LowerSelf)) {
+            let open: Spanned<Token![mut]> = cursor.parse()?;
+            let s: Spanned<Token![self]> = cursor.parse()?;
+
+            let param_span = open.span().to(s.span());
+            Ok(Spanned::new(MethodParam::SelfParam{mutability: Mutability::Mut, ty: SelfParam::Value}, param_span))
+        } else {
+            let (param, span) = cursor.parse::<Spanned<FnParam>>()?.deconstruct();
+            Ok(Spanned::new(MethodParam::FnParam(param), span))
+        }
+    }
+    
+    fn description(&self) -> &'static str {
+        "method parameter"
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfParam {
+    Value,
+    Reference,
 }
 
 #[derive(Debug, Clone, PartialEq)]

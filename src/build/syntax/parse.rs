@@ -168,6 +168,13 @@ impl<'a> Cursor<'a> {
             .unwrap_or(false)
     }
 
+    pub fn check2(&self, other: &Token) -> bool {
+        self.stream
+            .get(self.position+1)
+            .map(|next| next.inner() == other)
+            .unwrap_or(false)
+    }
+
     #[inline]
     pub fn peek_offset(&self, offset: usize) -> Option<&Spanned<Token>> {
         self.stream.get(self.position + offset)

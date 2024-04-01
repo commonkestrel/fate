@@ -1,5 +1,7 @@
 use std::alloc;
 use std::io::puts;
+use std::io::Display;
+use std::io::Writer;
 
 enum FooBar {
     Foo,
@@ -15,6 +17,7 @@ fn main(): void {
     let string: str = "hello world";
 
     let foobar: FooBar = FooBar::Baz<0, 132>;
+    // let bytes: [u8; 5] = [0, 1, 2, 3, 4];
     // match foobar {
     //     Foo => puts("foo"),
     //     Bar {foo, bar} => puts("bar"),
@@ -24,16 +27,14 @@ fn main(): void {
 }
 
 pub fn sin_cos(n: u8): <u8, u8> {
-    return <sin(n), cos(n)>;
+    return <std::math::sin(n), std::math::cos(n)>;
 }
 
 struct String {
     ptr: *mut u8,
     capactity: u16,
     len: u16,
-}
 
-impl String {
     pub fn new(): String {
         // Alloc a single slot for 
         let ptr: *mut u8 = alloc::malloc(1);
@@ -49,7 +50,12 @@ impl String {
         return String {
             ptr = ptr,
             capacity = s.len(),
-            
         };
+    }
+
+    pub fn display(*self, writer: *mut Writer): void
+        implements Display::display
+    {
+        writer.write(self.ptr, len);
     }
 }
