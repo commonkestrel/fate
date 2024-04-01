@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap, ops::{Deref, Range, RangeBounds, RangeInclusive}, path::PathBuf, slice::SliceIndex, sync::Arc
+    collections::HashMap, ops::{Deref, Range, RangeBounds, RangeInclusive}, path::{Path, PathBuf}, slice::SliceIndex, sync::Arc
 };
 
 use super::{
@@ -11,11 +11,7 @@ use super::{
     },
 };
 use crate::{
-    diagnostic::Diagnostic,
-    error,
-    span::{Lookup, Span, Spanned},
-    spanned_error,
-    spanned_debug,
+    diagnostic::Diagnostic, error, span::{Lookup, Span, Spanned}, spanned_debug, spanned_error, Token
 };
 
 pub fn parse(stream: TokenStream, home: PathBuf, source_name: Arc<String>, lookup: Arc<Lookup>) -> Result<Namespace, Vec<Diagnostic>> {
@@ -254,6 +250,14 @@ macro_rules! delimeterized {
             }
         }
 
+        impl<T> Deref for $ident<T> {
+            type Target = T;
+
+            fn deref(&self) -> &T {
+                self.inner()
+            }
+        }
+
         impl<T: Parsable> Parsable for Spanned<$ident<T>> {
             fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
                 let open: Spanned<$open> = cursor.parse()?;
@@ -489,11 +493,11 @@ macro_rules! punctuated {
     }};
 }
 
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Namespace {
     home: PathBuf,
     imports: Vec<(Spanned<Use>, Visibility)>,
+    submodules: Vec<(Submodule, Visibility)>,
     statics: Vec<(Spanned<Static>, Visibility)>,
     structs: Vec<(Spanned<Struct>, Visibility)>,
     unions: Vec<(Spanned<Union>, Visibility)>,
@@ -506,6 +510,7 @@ impl Namespace {
         Namespace {
             home,
             imports: Vec::new(),
+            submodules: Vec::new(),
             statics: Vec::new(),
             structs: Vec::new(),
             unions: Vec::new(),
@@ -515,10 +520,38 @@ impl Namespace {
     }
 
     fn bubble_errors(&self, output: &mut Vec<Diagnostic>) {
+        self.submodules.iter().for_each(|sm| { sm.0.content.as_ref().map(|nm| nm.bubble_errors(output)); });
         self.statics.iter().for_each(|st| st.0.value.bubble_errors(output));
         self.structs.iter().for_each(|st| st.0.fields.values().for_each(|def| def.ty.bubble_errors(output)));
         self.unions.iter().for_each(|un| un.0.fields.values().for_each(|def| def.ty.bubble_errors(output)));
         self.enums.iter().for_each(|en| en.0.variants.values().for_each(|var| var.ty.bubble_errors(output)));
         self.functions.iter().for_each(|fu| fu.0.bubble_errors(output));
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Submodule {
+    ident: Spanned<Ident>,
+    content: Option<Spanned<Braced<Namespace>>>,
+}
+
+impl Submodule {
+    fn parse(cursor: &mut Cursor, parent_home: &Path) -> Result<Self, Diagnostic> {
+        let _: Token![namespace] = cursor.parse()?;
+        let ident: Spanned<Ident> = cursor.parse()?;
+        
+        let content = if cursor.check(&Token::Delimeter(Delimeter::OpenBrace)) {
+            let open: Spanned<OpenBrace> = cursor.parse()?;
+            todo!()
+        } else {
+            let _: Token![;] = cursor.parse()?;
+            None
+        };
+
+        Ok(Submodule{ident, content})
+    }
+
+    fn description(&self) -> &'static str {
+        "namespace"
     }
 }
