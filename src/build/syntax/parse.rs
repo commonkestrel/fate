@@ -89,6 +89,17 @@ pub fn parse(stream: TokenStream, home: PathBuf, source_name: Arc<String>, looku
                     continue;
                 }
             }),
+            Token::Keyword(Keyword::Namespace) => namespace.submodules.push(match Submodule::parse(&mut cursor) {
+                Ok(submodule) => {
+                    let ret = (submodule, visibility);
+                    visibility = Visibility::Private;
+                    ret
+                },
+                Err(err) => {
+                    errors.push(err);
+                    continue;
+                }
+            }),
             Token::Keyword(Keyword::Pub) => {
                 cursor.step();
                 visibility = Visibility::Public;
@@ -536,22 +547,20 @@ pub struct Submodule {
 }
 
 impl Submodule {
-    fn parse(cursor: &mut Cursor, parent_home: &Path) -> Result<Self, Diagnostic> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         let _: Token![namespace] = cursor.parse()?;
         let ident: Spanned<Ident> = cursor.parse()?;
         
         let content = if cursor.check(&Token::Delimeter(Delimeter::OpenBrace)) {
             let open: Spanned<OpenBrace> = cursor.parse()?;
-            todo!()
+            let mut depth = 0;
+
+            todo!();
         } else {
             let _: Token![;] = cursor.parse()?;
             None
         };
 
         Ok(Submodule{ident, content})
-    }
-
-    fn description(&self) -> &'static str {
-        "namespace"
     }
 }
