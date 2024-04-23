@@ -21,7 +21,6 @@ pub fn parse(stream: TokenStream, home: PathBuf, source_name: Arc<String>, looku
     let mut visibility = Visibility::Private;
 
     while let Some(tok) = cursor.peek() {
-        spanned_debug!(tok.span().clone(), "").sync_emit();
         match tok.inner() {
             Token::Keyword(Keyword::Fn) => namespace.functions.push(match cursor.parse() {
                 Ok(func) => {

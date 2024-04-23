@@ -108,7 +108,7 @@ pub async fn build(args: BuildArgs) -> Result<(), BuildError> {
 
     // println!("{functions:#?}");
     println!(
-        "\t{} building {} in {}",
+        "    {} building `{}` in {}",
         "Finished".bold().green(),
         root_path.display(),
         elapsed(start.elapsed()),
