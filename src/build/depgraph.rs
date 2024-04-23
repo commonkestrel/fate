@@ -48,3 +48,10 @@ impl<T: Eq> DepGraph<T> {
         self.nodes.iter().position(|n| n == node)
     }
 }
+
+pub struct DepGraphIterator<'a, T: Eq + 'a> {
+    depgraph: &'a DepGraph<T>,
+    target: usize,
+    satisfied: Vec<usize>,
+    curpath: Vec<usize>,
+}
