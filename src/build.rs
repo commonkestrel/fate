@@ -15,6 +15,7 @@ mod ascii;
 mod deps;
 mod generator;
 mod symbol_table;
+mod depgraph;
 mod syntax {
     pub mod ast;
     pub mod lex;
