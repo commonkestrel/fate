@@ -58,7 +58,7 @@ pub enum Type {
     Vector(Vec<Spanned<Type>>),
     Composite {
         ident: Path,
-        generics: Vec<Type>,
+        generics: Vec<Spanned<Type>>,
     },
     BigSelf,
     Err(Diagnostic),
@@ -189,22 +189,37 @@ impl Parsable for Spanned<Type> {
 
                 let path = Punctuated::new(path_inner, last_ident);
 
-                let (composite, span) = if cursor.peek(&Token::Punctuation(Punctuation::Lt)) {
+                let (composite, span) = if cursor.check(&Token::Punctuation(Punctuation::Lt)) {
                     let open: Spanned<Token![<]> = cursor.parse()?;
-                    let mut types = Vec::new();
-                    let mut comma /// The above code is a comment in Rust programming language. It
-                    /// starts with `/*` and ends with `*/`, indicating a block comment.
-                    /// The `=` sign followed by `false;` is not valid Rust code and is
-                    /// just part of the comment.
-                    = false;
+                    let mut types: Vec<Spanned<Type>> = Vec::new();
+                    let mut comma = false;
 
                     while let Some(tok) = cursor.peek() {
                         match tok.inner() {
-                            Token::Punctuation(Punctuation::Gt) => break,
+                            Token::Punctuation(Punctuation::Gt) => {
+                                    return Ok(Spanned::new(Type::Composite {
+                                        ident: path.into(),
+                                        generics: types,
+                                    }, open.span().to(tok.span())))
+                            },
+                            Token::Punctuation(Punctuation::Comma) => comma = true,
+                            _ => {
+                                let span = tok.span().clone();
+                                if !comma {
+                                    types.push(Spanned::new(Type::Err(spanned_error!(span.clone(), "expected comma between types, found {}", tok.inner().description())), span.clone()));
+                                }
+                                comma = false;
+
+                                types.push(match cursor.parse() {
+                                    Ok(ty) => ty,
+                                    Err(err) => Spanned::new(Type::Err(err), span),
+                                });
+                            }
                         }
                     }
 
-                    (Type::Err(spanned_error!(open.into_span(), "unmatched opening arrow")), open.into_span())
+                    let open_span = open.into_span();
+                    (Type::Err(spanned_error!(open_span.clone(), "unmatched opening arrow")), open_span)
                 } else {
                     let path_span = span.to(path.last().unwrap().span());
                     let composite = Type::Composite {
@@ -1180,8 +1195,6 @@ impl Expr {
                     Err(err) => return Spanned::new(Expr::Err(err), span),
                 };
 
-                debug!("{:?}", vec_inner.stream()).sync_emit();
-
                 let mut components_inner = Vec::new();
                 let mut last_component = None;
 
@@ -1396,8 +1409,6 @@ impl Expr {
                             Err(err) => return Spanned::new(Expr::Err(err), open.into_span()),
                         };
 
-                        debug!("{:?}", vec_inner.stream()).sync_emit();
-
                         let mut components_inner = Vec::new();
                         let mut last_component = None;
 
@@ -1476,7 +1487,6 @@ fn vector_inner<'a>(cursor: &'a mut Cursor, open_span: &Span) -> Result<Cursor<'
             Token::Punctuation(Punctuation::Gt) => {
                 if !is_factor(cursor.peek_offset(offset + 1).map(Spanned::inner)) {
                     if depth == 0 {
-                        spanned_debug!(tok.span().clone(), "vector end").sync_emit();
                         cursor.position += offset;
                         return Ok(cursor.slice((cursor.position - offset)..cursor.position));
                     }
@@ -1745,7 +1755,6 @@ impl Parsable for Spanned<Statement> {
 
                 while !cursor.at_end() {
                     let peek = cursor.peek().unwrap();
-                    spanned_debug!(peek.span().clone(), "{:?}", peek.inner()).sync_emit();
                     if cursor.check(&Token::Delimeter(Delimeter::CloseBrace)) {
                         let close: Spanned<CloseBrace> = cursor.parse()?;
                         let block_span = span.to(close.span());
