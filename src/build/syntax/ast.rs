@@ -56,7 +56,10 @@ pub enum Type {
         len: Box<Spanned<Expr>>,
     },
     Vector(Vec<Spanned<Type>>),
-    Composite(Path),
+    Composite {
+        ident: Path,
+        generics: Vec<Type>,
+    },
     BigSelf,
     Err(Diagnostic),
 }
@@ -66,7 +69,7 @@ impl Type {
         match self {
             Type::BigSelf => {}
             Type::Primitive(_) => {}
-            Type::Composite(_) => {}
+            Type::Composite{ident: _, generics} => generics.iter().for_each(|ty| ty.bubble_errors(output)),
             Type::Vector(types) => types.iter().for_each(|ty| ty.bubble_errors(output)),
             Type::Pointer { ty, .. } => ty.bubble_errors(output),
             Type::Array { ty, len } => {
@@ -186,8 +189,33 @@ impl Parsable for Spanned<Type> {
 
                 let path = Punctuated::new(path_inner, last_ident);
 
-                let path_span = span.to(path.last().unwrap().span());
-                Ok(Spanned::new(Type::Composite(path.into()), path_span))
+                let (composite, span) = if cursor.peek(&Token::Punctuation(Punctuation::Lt)) {
+                    let open: Spanned<Token![<]> = cursor.parse()?;
+                    let mut types = Vec::new();
+                    let mut comma /// The above code is a comment in Rust programming language. It
+                    /// starts with `/*` and ends with `*/`, indicating a block comment.
+                    /// The `=` sign followed by `false;` is not valid Rust code and is
+                    /// just part of the comment.
+                    = false;
+
+                    while let Some(tok) = cursor.peek() {
+                        match tok.inner() {
+                            Token::Punctuation(Punctuation::Gt) => break,
+                        }
+                    }
+
+                    (Type::Err(spanned_error!(open.into_span(), "unmatched opening arrow")), open.into_span())
+                } else {
+                    let path_span = span.to(path.last().unwrap().span());
+                    let composite = Type::Composite {
+                        ident: path.into(),
+                        generics: Vec::new(),
+                    };
+
+                    (composite, path_span)
+                };
+
+                Ok(Spanned::new(composite, span))
             }
             _ => Err(spanned_error!(
                 span,
@@ -1987,4 +2015,9 @@ impl Parsable for FnCall {
     fn description(&self) -> &'static str {
         "function call"
     }
+}
+
+struct Generic {
+    ident: Spanned<Ident>,
+    requirements: Punctuated<Path, Token![,]>,
 }
