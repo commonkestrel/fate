@@ -272,21 +272,21 @@ impl Parsable for TokenStream {
 }
 
 macro_rules! delimeterized {
-    ($name:literal, $ident:ident, $open:ident, $close:ident, $open_inner:pat, $close_inner:pat, $error:literal) => {
+    ($name:literal, $struct:ident, $fn:ident, $open:ident, $close:ident, $open_inner:pat, $close_inner:pat, $error:literal) => {
         #[derive(Debug, Clone, PartialEq)]
-        pub struct $ident<T> {
+        pub struct $struct<T> {
             open: $open,
             inner: T,
             close: $close,
         }
 
-        impl<T> $ident<T> {
+        impl<T> $struct<T> {
             pub fn inner(&self) -> &T {
                 &self.inner
             }
         }
 
-        impl<T> Deref for $ident<T> {
+        impl<T> Deref for $struct<T> {
             type Target = T;
 
             fn deref(&self) -> &T {
@@ -294,7 +294,7 @@ macro_rules! delimeterized {
             }
         }
 
-        impl<T: Parsable> Parsable for Spanned<$ident<T>> {
+        impl<T: Parsable> Parsable for Spanned<$struct<T>> {
             fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
                 let open: Spanned<$open> = cursor.parse()?;
 
@@ -310,7 +310,7 @@ macro_rules! delimeterized {
                                 let close: Spanned<$close> = cursor.parse()?;
                                 let span = open.span().to(close.span());
                                 return Ok(Spanned::new(
-                                    $ident {
+                                    $struct {
                                         open: open.into_inner(),
                                         inner: T::parse(&mut cursor.slice(start..i))?,
                                         close: close.into_inner(),
@@ -336,7 +336,7 @@ macro_rules! delimeterized {
             }
         }
 
-        impl<T: Parsable> Parsable for $ident<T> {
+        impl<T: Parsable> Parsable for $struct<T> {
             fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
                 let open: Spanned<$open> = cursor.parse()?;
 
@@ -350,7 +350,7 @@ macro_rules! delimeterized {
                         $close_inner => {
                             if depth == 0 {
                                 let close: Spanned<$close> = cursor.parse()?;
-                                return Ok($ident {
+                                return Ok($struct {
                                     open: open.into_inner(),
                                     inner: T::parse(&mut cursor.slice(start..(start + i)))?,
                                     close: close.into_inner(),
@@ -373,12 +373,23 @@ macro_rules! delimeterized {
                 concat!($name, " expression")
             }
         }
+
+        pub fn $fn<'a>(cursor: &'a mut Cursor) -> Result<Cursor<'a>, Diagnostic> {
+            let open: Spanned<$open> = cursor.parse()?;
+
+            while let Some(tok) = cursor.next() {
+
+            }
+
+            Err(spanned_error!(open.into_span(), concat!("unmatched opening ", $error)))
+        }
     };
 }
 
 delimeterized!(
     "parenthesized",
     Parenthesized,
+    parenthesized,
     OpenParen,
     CloseParen,
     Token::Delimeter(Delimeter::OpenParen),
@@ -388,6 +399,7 @@ delimeterized!(
 delimeterized!(
     "bracketed",
     Bracketed,
+    bracketed,
     OpenBracket,
     CloseBracket,
     Token::Delimeter(Delimeter::OpenBracket),
@@ -397,6 +409,7 @@ delimeterized!(
 delimeterized!(
     "braced",
     Braced,
+    braced,
     OpenBrace,
     CloseBrace,
     Token::Delimeter(Delimeter::OpenBrace),
@@ -406,6 +419,7 @@ delimeterized!(
 delimeterized!(
     "arrowed",
     Arrowed,
+    arrowed,
     Lt,
     Gt,
     Token::Punctuation(Punctuation::Lt),

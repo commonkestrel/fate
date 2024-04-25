@@ -11,7 +11,7 @@ use crate::{
 
 use super::{
     lex::{self, Delimeter, Keyword, Punctuation, Token},
-    parse::{Cursor, Parenthesized, Parsable, Punctuated},
+    parse::{parenthesized, Cursor, Parenthesized, Parsable, Punctuated},
     token::{
         CloseBrace, CloseBracket, CloseParen, Colon, Comma, DoubleColon, Eq, Gt, Ident, LowerSelf,
         Mut, OpenBrace, OpenParen, Semicolon,
@@ -150,11 +150,11 @@ impl Parsable for Spanned<Type> {
                     arr_span,
                 ))
             }
-            Token::Punctuation(Punctuation::Lt) => {
+            Token::Delimeter(Delimeter::OpenParen) => {
                 let mut types = Vec::new();
 
                 while !cursor.at_end() {
-                    if cursor.check(&Token::Punctuation(Punctuation::Gt)) {
+                    if cursor.check(&Token::Delimeter(Delimeter::CloseParen)) {
                         let close: Spanned<Gt> = cursor.parse()?;
                         let vec_span = span.to(close.span());
 
@@ -163,12 +163,12 @@ impl Parsable for Spanned<Type> {
 
                     let ty = cursor.parse()?;
                     types.push(ty);
-                    if !cursor.check(&Token::Punctuation(Punctuation::Gt)) {
+                    if !cursor.check(&Token::Delimeter(Delimeter::CloseParen)) {
                         let _: Comma = cursor.parse()?;
                     }
                 }
 
-                Err(spanned_error!(span, "unmatched opening arrow"))
+                Err(spanned_error!(span, "unmatched opening parenthesis"))
             }
             Token::Keyword(Keyword::Fn) => {
                 let open_paren: Spanned<OpenParen> = cursor.parse()?;
@@ -1334,9 +1334,9 @@ impl Expr {
             Token::Immediate(i) => Spanned::new(Expr::Immediate(i), span),
             Token::String(str) => Spanned::new(Expr::Str(str), span),
             Token::Keyword(Keyword::LowerSelf) => Spanned::new(Expr::SelfVar, span),
-            Token::Punctuation(Punctuation::Lt) => {
-                let mut vec_inner = match vector_inner(cursor, &span) {
-                    Ok(inner) => inner,
+            Token::Delimeter(Delimeter::OpenParen) => {
+                let mut vec_inner = match parenthesized(cursor) {
+                    Ok(paren) => paren,
                     Err(err) => return Spanned::new(Expr::Err(err), span),
                 };
 
