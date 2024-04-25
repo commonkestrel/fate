@@ -3,5 +3,4 @@ enum Instruction {
     AddI(),
     SubR(),
     SubI(),
-
 }

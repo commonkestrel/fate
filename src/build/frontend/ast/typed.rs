@@ -4,10 +4,6 @@ pub fn resolve() -> Result<Namespace, Vec<Diagnostic>> {
     todo!()
 }
 
-pub struct Namespace {
+pub struct Namespace {}
 
-}
-
-pub struct Struct {
-
-}
+pub struct Struct {}

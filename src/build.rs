@@ -1,6 +1,7 @@
 use crate::{
     build::syntax::lex::Token,
-    cfg::{Config, ConfigError, ProjectType}, error,
+    cfg::{Config, ConfigError, ProjectType},
+    error,
 };
 use async_std::fs::File;
 use clap::Args;
@@ -12,9 +13,9 @@ use thiserror::Error;
 use self::syntax::parse;
 
 mod ascii;
+mod depgraph;
 mod deps;
 mod symbol_table;
-mod depgraph;
 mod syntax {
     pub mod ast;
     pub mod lex;
@@ -29,8 +30,8 @@ mod frontend {
 }
 
 mod backend {
-    pub mod linker;
     pub mod codegen;
+    pub mod linker;
 }
 
 const SOURCE: &str = "src";
@@ -96,19 +97,23 @@ pub async fn build(args: BuildArgs) -> Result<(), BuildError> {
     //     );
     // }
 
-    let namespace =
-        match parse::parse(root_stream.stream, home_path, root_stream.source, root_stream.lookup) {
-            Ok(stream) => stream,
-            Err(errors) => {
-                for err in errors {
-                    err.emit().await;
-                }
-
-                error!("build failed due to previous errors").emit().await;
-
-                return Err(BuildError::Lex(root_path));
+    let namespace = match parse::parse(
+        root_stream.stream,
+        home_path,
+        root_stream.source,
+        root_stream.lookup,
+    ) {
+        Ok(stream) => stream,
+        Err(errors) => {
+            for err in errors {
+                err.emit().await;
             }
-        };
+
+            error!("build failed due to previous errors").emit().await;
+
+            return Err(BuildError::Lex(root_path));
+        }
+    };
 
     // println!("{functions:#?}");
     println!(

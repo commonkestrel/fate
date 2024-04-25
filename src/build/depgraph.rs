@@ -19,7 +19,9 @@ impl<T: Eq> DepGraph<T> {
 
         self.deps
             .entry(node_pos)
-            .and_modify(|node| { node.insert(dependency_pos); })
+            .and_modify(|node| {
+                node.insert(dependency_pos);
+            })
             .or_insert_with(|| {
                 let mut deps = HashSet::with_capacity(1);
                 deps.insert(dependency_pos);

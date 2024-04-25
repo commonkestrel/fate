@@ -1,5 +1,9 @@
 use std::{
-    collections::HashMap, ops::{Deref, Range, RangeBounds, RangeInclusive}, path::{Path, PathBuf}, slice::SliceIndex, sync::Arc
+    collections::HashMap,
+    ops::{Deref, Range, RangeBounds, RangeInclusive},
+    path::{Path, PathBuf},
+    slice::SliceIndex,
+    sync::Arc,
 };
 
 use super::{
@@ -11,10 +15,18 @@ use super::{
     },
 };
 use crate::{
-    diagnostic::Diagnostic, error, span::{Lookup, Span, Spanned}, spanned_debug, spanned_error, Token
+    diagnostic::Diagnostic,
+    error,
+    span::{Lookup, Span, Spanned},
+    spanned_debug, spanned_error, Token,
 };
 
-pub fn parse(stream: TokenStream, home: PathBuf, source_name: Arc<String>, lookup: Arc<Lookup>) -> Result<Namespace, Vec<Diagnostic>> {
+pub fn parse(
+    stream: TokenStream,
+    home: PathBuf,
+    source_name: Arc<String>,
+    lookup: Arc<Lookup>,
+) -> Result<Namespace, Vec<Diagnostic>> {
     let mut cursor = Cursor::new(&stream, source_name, lookup);
     let mut errors = Vec::new();
     let mut namespace = Namespace::empty(home);
@@ -27,7 +39,7 @@ pub fn parse(stream: TokenStream, home: PathBuf, source_name: Arc<String>, looku
                     let ret = (func, visibility);
                     visibility = Visibility::Private;
                     ret
-                },
+                }
                 Err(err) => {
                     errors.push(err);
                     continue;
@@ -38,7 +50,7 @@ pub fn parse(stream: TokenStream, home: PathBuf, source_name: Arc<String>, looku
                     let ret = (stat, visibility);
                     visibility = Visibility::Private;
                     ret
-                },
+                }
                 Err(err) => {
                     errors.push(err);
                     continue;
@@ -49,7 +61,7 @@ pub fn parse(stream: TokenStream, home: PathBuf, source_name: Arc<String>, looku
                     let ret = (struc, visibility);
                     visibility = Visibility::Private;
                     ret
-                },
+                }
                 Err(err) => {
                     errors.push(err);
                     continue;
@@ -60,7 +72,7 @@ pub fn parse(stream: TokenStream, home: PathBuf, source_name: Arc<String>, looku
                     let ret = (un, visibility);
                     visibility = Visibility::Private;
                     ret
-                },
+                }
                 Err(err) => {
                     errors.push(err);
                     continue;
@@ -71,7 +83,7 @@ pub fn parse(stream: TokenStream, home: PathBuf, source_name: Arc<String>, looku
                     let ret = (en, visibility);
                     visibility = Visibility::Private;
                     ret
-                },
+                }
                 Err(err) => {
                     errors.push(err);
                     continue;
@@ -82,31 +94,39 @@ pub fn parse(stream: TokenStream, home: PathBuf, source_name: Arc<String>, looku
                     let ret = (import, visibility);
                     visibility = Visibility::Private;
                     ret
-                },
+                }
                 Err(err) => {
                     errors.push(err);
                     continue;
                 }
             }),
-            Token::Keyword(Keyword::Namespace) => namespace.submodules.push(match Submodule::parse(&mut cursor) {
-                Ok(submodule) => {
-                    let ret = (submodule, visibility);
-                    visibility = Visibility::Private;
-                    ret
-                },
-                Err(err) => {
-                    errors.push(err);
-                    continue;
-                }
-            }),
+            Token::Keyword(Keyword::Namespace) => {
+                namespace
+                    .submodules
+                    .push(match Submodule::parse(&mut cursor) {
+                        Ok(submodule) => {
+                            let ret = (submodule, visibility);
+                            visibility = Visibility::Private;
+                            ret
+                        }
+                        Err(err) => {
+                            errors.push(err);
+                            continue;
+                        }
+                    })
+            }
             Token::Keyword(Keyword::Pub) => {
                 cursor.step();
                 visibility = Visibility::Public;
             }
             _ => {
-                errors.push(spanned_error!(tok.span().clone(), "unexpected {} in top level section", tok.description()));
+                errors.push(spanned_error!(
+                    tok.span().clone(),
+                    "unexpected {} in top level section",
+                    tok.description()
+                ));
                 cursor.step();
-            },
+            }
         }
     }
 
@@ -176,7 +196,7 @@ impl<'a> Cursor<'a> {
 
     pub fn check2(&self, other: &Token) -> bool {
         self.stream
-            .get(self.position+1)
+            .get(self.position + 1)
             .map(|next| next.inner() == other)
             .unwrap_or(false)
     }
@@ -536,12 +556,30 @@ impl Namespace {
     }
 
     fn bubble_errors(&self, output: &mut Vec<Diagnostic>) {
-        self.submodules.iter().for_each(|sm| { sm.0.content.as_ref().map(|nm| nm.bubble_errors(output)); });
-        self.statics.iter().for_each(|st| st.0.value.bubble_errors(output));
-        self.structs.iter().for_each(|st| st.0.fields.values().for_each(|def| def.ty.bubble_errors(output)));
-        self.unions.iter().for_each(|un| un.0.fields.values().for_each(|def| def.ty.bubble_errors(output)));
-        self.enums.iter().for_each(|en| en.0.variants.values().for_each(|var| var.ty.bubble_errors(output)));
-        self.functions.iter().for_each(|fu| fu.0.bubble_errors(output));
+        self.submodules.iter().for_each(|sm| {
+            sm.0.content.as_ref().map(|nm| nm.bubble_errors(output));
+        });
+        self.statics
+            .iter()
+            .for_each(|st| st.0.value.bubble_errors(output));
+        self.structs.iter().for_each(|st| {
+            st.0.fields
+                .values()
+                .for_each(|def| def.ty.bubble_errors(output))
+        });
+        self.unions.iter().for_each(|un| {
+            un.0.fields
+                .values()
+                .for_each(|def| def.ty.bubble_errors(output))
+        });
+        self.enums.iter().for_each(|en| {
+            en.0.variants
+                .values()
+                .for_each(|var| var.ty.bubble_errors(output))
+        });
+        self.functions
+            .iter()
+            .for_each(|fu| fu.0.bubble_errors(output));
     }
 }
 
@@ -555,7 +593,7 @@ impl Submodule {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         let _: Token![namespace] = cursor.parse()?;
         let ident: Spanned<Ident> = cursor.parse()?;
-        
+
         let content = if cursor.check(&Token::Delimeter(Delimeter::OpenBrace)) {
             let open: Spanned<OpenBrace> = cursor.parse()?;
             let mut depth = 0;
@@ -566,6 +604,6 @@ impl Submodule {
             None
         };
 
-        Ok(Submodule{ident, content})
+        Ok(Submodule { ident, content })
     }
 }

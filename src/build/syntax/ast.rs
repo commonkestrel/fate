@@ -13,7 +13,8 @@ use super::{
     lex::{self, Delimeter, Keyword, Punctuation, Token},
     parse::{Cursor, Parenthesized, Parsable, Punctuated},
     token::{
-        CloseBrace, CloseBracket, CloseParen, Colon, Comma, DoubleColon, Eq, Gt, Ident, LowerSelf, Mut, OpenBrace, OpenParen, Semicolon
+        CloseBrace, CloseBracket, CloseParen, Colon, Comma, DoubleColon, Eq, Gt, Ident, LowerSelf,
+        Mut, OpenBrace, OpenParen, Semicolon,
     },
 };
 
@@ -63,7 +64,7 @@ pub enum Type {
     BigSelf,
     FnPtr {
         params: Punctuated<Spanned<Type>, Token![,]>,
-        return_type: Box<Spanned<Type>>
+        return_type: Box<Spanned<Type>>,
     },
     Err(Diagnostic),
 }
@@ -73,15 +74,16 @@ impl Type {
         match self {
             Type::BigSelf => false,
             Type::Primitive(_) => false,
-            Type::Composite{ident: _, generics} => generics.iter().any(|gen| gen.contains_errors()),
+            Type::Composite { ident: _, generics } => {
+                generics.iter().any(|gen| gen.contains_errors())
+            }
             Type::Tuple(types) => types.iter().any(|ty| ty.contains_errors()),
-            Type::Pointer {ty, ..} => ty.contains_errors(),
-            Type::Array { ty, len } => {
-                ty.contains_errors() || len.contains_errors()
-            },
-            Type::FnPtr {params, return_type} => {
-                params.values().any(|ty| ty.contains_errors()) || return_type.contains_errors()
-            },
+            Type::Pointer { ty, .. } => ty.contains_errors(),
+            Type::Array { ty, len } => ty.contains_errors() || len.contains_errors(),
+            Type::FnPtr {
+                params,
+                return_type,
+            } => params.values().any(|ty| ty.contains_errors()) || return_type.contains_errors(),
             Type::Err(_) => true,
         }
     }
@@ -90,14 +92,19 @@ impl Type {
         match self {
             Type::BigSelf => {}
             Type::Primitive(_) => {}
-            Type::Composite{ident: _, generics} => generics.iter().for_each(|ty| ty.bubble_errors(output)),
+            Type::Composite { ident: _, generics } => {
+                generics.iter().for_each(|ty| ty.bubble_errors(output))
+            }
             Type::Tuple(types) => types.iter().for_each(|ty| ty.bubble_errors(output)),
             Type::Pointer { ty, .. } => ty.bubble_errors(output),
             Type::Array { ty, len } => {
                 ty.bubble_errors(output);
                 len.bubble_errors(output);
             }
-            Type::FnPtr {params, return_type} => {
+            Type::FnPtr {
+                params,
+                return_type,
+            } => {
                 params.values().for_each(|ty| ty.bubble_errors(output));
                 return_type.bubble_errors(output);
             }
@@ -178,42 +185,53 @@ impl Parsable for Spanned<Type> {
                             let ret: Spanned<Type> = cursor.parse()?;
 
                             return Ok(Spanned::new(
-                                Type::FnPtr{params, return_type: Box::new(ret)},
-                                open_paren.span().to(tok.span())
+                                Type::FnPtr {
+                                    params,
+                                    return_type: Box::new(ret),
+                                },
+                                open_paren.span().to(tok.span()),
                             ));
                         }
-                        Token::Punctuation(Punctuation::Comma) => {
-                            match last_type.take() {
-                                Some(ty) => types.push((
-                                    ty,
-                                    cursor.parse()?,
-                                )),
-                                None => {
-                                    types.push((
-                                        Spanned::new(Type::Err(spanned_error!(tok.span().clone(), "unmatched duplicate seperator")), tok.into_span()),
-                                        cursor.parse()?
-                                    ))
-                                }
-                            }
-                        }
+                        Token::Punctuation(Punctuation::Comma) => match last_type.take() {
+                            Some(ty) => types.push((ty, cursor.parse()?)),
+                            None => types.push((
+                                Spanned::new(
+                                    Type::Err(spanned_error!(
+                                        tok.span().clone(),
+                                        "unmatched duplicate seperator"
+                                    )),
+                                    tok.into_span(),
+                                ),
+                                cursor.parse()?,
+                            )),
+                        },
                         inner => {
                             if last_type.is_some() {
-                                return Ok(Spanned::new(Type::Err(spanned_error!(
-                                    tok.span().clone(),
-                                    "expected seperator or closing parenthesis, found {}",
-                                    inner.description()
-                                )), tok.into_span()));
+                                return Ok(Spanned::new(
+                                    Type::Err(spanned_error!(
+                                        tok.span().clone(),
+                                        "expected seperator or closing parenthesis, found {}",
+                                        inner.description()
+                                    )),
+                                    tok.into_span(),
+                                ));
                             }
 
                             last_type = Some(match cursor.parse() {
                                 Ok(ty) => ty,
-                                Err(err) => Spanned::new(Type::Err(err), tok.into_span())
+                                Err(err) => Spanned::new(Type::Err(err), tok.into_span()),
                             });
                         }
                     }
                 }
 
-                Ok(Spanned::new(Type::Err(spanned_error!(open_paren.span().clone(), "unmatched opening parenthesis")), open_paren.into_span()))
+                Ok(Spanned::new(
+                    Type::Err(spanned_error!(
+                        open_paren.span().clone(),
+                        "unmatched opening parenthesis"
+                    )),
+                    open_paren.into_span(),
+                ))
             }
             Token::Ident(_) => {
                 cursor.step_back();
@@ -275,16 +293,26 @@ impl Parsable for Spanned<Type> {
                     while let Some(tok) = cursor.peek() {
                         match tok.inner() {
                             Token::Punctuation(Punctuation::Gt) => {
-                                    return Ok(Spanned::new(Type::Composite {
+                                return Ok(Spanned::new(
+                                    Type::Composite {
                                         ident: path.into(),
                                         generics: types,
-                                    }, open.span().to(tok.span())))
-                            },
+                                    },
+                                    open.span().to(tok.span()),
+                                ))
+                            }
                             Token::Punctuation(Punctuation::Comma) => comma = true,
                             _ => {
                                 let span = tok.span().clone();
                                 if !comma {
-                                    types.push(Spanned::new(Type::Err(spanned_error!(span.clone(), "expected comma between types, found {}", tok.inner().description())), span.clone()));
+                                    types.push(Spanned::new(
+                                        Type::Err(spanned_error!(
+                                            span.clone(),
+                                            "expected comma between types, found {}",
+                                            tok.inner().description()
+                                        )),
+                                        span.clone(),
+                                    ));
                                 }
                                 comma = false;
 
@@ -297,7 +325,10 @@ impl Parsable for Spanned<Type> {
                     }
 
                     let open_span = open.into_span();
-                    (Type::Err(spanned_error!(open_span.clone(), "unmatched opening arrow")), open_span)
+                    (
+                        Type::Err(spanned_error!(open_span.clone(), "unmatched opening arrow")),
+                        open_span,
+                    )
                 } else {
                     let path_span = span.to(path.last().unwrap().span());
                     let composite = Type::Composite {
@@ -359,7 +390,10 @@ impl Parsable for Spanned<Struct> {
             while !cursor.at_end() {
                 if cursor.check(&Token::Delimeter(Delimeter::CloseBrace)) {
                     break;
-                } else if cursor.check(&Token::Keyword(Keyword::Fn)) || (cursor.check(&Token::Keyword(Keyword::Pub)) && cursor.check2(&Token::Keyword(Keyword::Fn))) {
+                } else if cursor.check(&Token::Keyword(Keyword::Fn))
+                    || (cursor.check(&Token::Keyword(Keyword::Pub))
+                        && cursor.check2(&Token::Keyword(Keyword::Fn)))
+                {
                     methods.push(cursor.parse()?);
                 } else {
                     let field: FieldDef = cursor.parse()?;
@@ -553,7 +587,10 @@ impl Parsable for Spanned<Enum> {
 
         let close: Spanned<CloseBrace> = cursor.parse()?;
 
-        Ok(Spanned::new(Enum{ident, variants}, open.span().to(close.span())))
+        Ok(Spanned::new(
+            Enum { ident, variants },
+            open.span().to(close.span()),
+        ))
     }
 
     fn description(&self) -> &'static str {
@@ -693,12 +730,15 @@ impl Parsable for Spanned<Static> {
         let ident = cursor.parse()?;
 
         let _: Token![=] = cursor.parse()?;
-        
+
         let value = cursor.parse()?;
 
         let close: Spanned<Token![;]> = cursor.parse()?;
 
-        Ok(Spanned::new(Static {vis, ident, value}, open.span().to(close.span())))
+        Ok(Spanned::new(
+            Static { vis, ident, value },
+            open.span().to(close.span()),
+        ))
     }
 
     fn description(&self) -> &'static str {
@@ -717,7 +757,10 @@ impl Parsable for Spanned<Use> {
         let reference = cursor.parse()?;
         let close: Spanned<Token![;]> = cursor.parse()?;
 
-        Ok(Spanned::new(Use{reference}, open.span().to(close.span())))
+        Ok(Spanned::new(
+            Use { reference },
+            open.span().to(close.span()),
+        ))
     }
 
     fn description(&self) -> &'static str {
@@ -798,23 +841,17 @@ impl Expr {
             Expr::SelfVar => false,
             Expr::Cast(_, expr) => expr.contains_errors(),
             Expr::Call(expr, params) => {
-                expr.contains_errors() ||
-                params
-                    .values()
-                    .any(|param| param.contains_errors())
+                expr.contains_errors() || params.values().any(|param| param.contains_errors())
             }
             Expr::Constructor { ident, components } => components
                 .values()
                 .any(|component| component.contains_errors()),
-            Expr::NamedConstructor { ident, fields } => fields
-                .values()
-                .any(|field| field.value.contains_errors()),
+            Expr::NamedConstructor { ident, fields } => {
+                fields.values().any(|field| field.value.contains_errors())
+            }
             Expr::Tuple(exprs) => exprs.values().any(|expr| expr.contains_errors()),
             Expr::Dot(dot) => dot.as_ref().0.contains_errors(),
-            Expr::BinaryOp(op) => {
-                op.left.contains_errors() ||
-                op.right.contains_errors()
-            }
+            Expr::BinaryOp(op) => op.left.contains_errors() || op.right.contains_errors(),
             Expr::UnaryOp(_, expr) => expr.contains_errors(),
             Expr::Err(err) => true,
         }
@@ -1753,24 +1790,25 @@ impl Statement {
                 content,
                 else_block,
             } => {
-                condition.contains_errors() ||
-                content.contains_errors() || else_block.as_ref().map(|block| block.contains_errors()).unwrap_or(false)
+                condition.contains_errors()
+                    || content.contains_errors()
+                    || else_block
+                        .as_ref()
+                        .map(|block| block.contains_errors())
+                        .unwrap_or(false)
             }
             Statement::Loop(content) => content.contains_errors(),
             Statement::For { contents, header } => {
-                header.init.contains_errors() ||
-                header.check.contains_errors() ||
-                header.post.contains_errors() ||
-
-                contents.contains_errors()
+                header.init.contains_errors()
+                    || header.check.contains_errors()
+                    || header.post.contains_errors()
+                    || contents.contains_errors()
             }
             Statement::While { check, contents } => {
-                check.contains_errors() ||
-                contents.contains_errors()
+                check.contains_errors() || contents.contains_errors()
             }
             Statement::Let { assignment, ty, .. } => {
-                assignment.contains_errors() ||
-                ty.contains_errors()
+                assignment.contains_errors() || ty.contains_errors()
             }
             Statement::Return(expr) => expr.contains_errors(),
             Statement::Block(content) => content.iter().any(|s| s.contains_errors()),
@@ -1845,7 +1883,7 @@ impl Parsable for Spanned<Statement> {
                     err.sync_emit();
                 }
                 let header = ForHeader { init, check, post };
-                
+
                 let _: CloseParen = cursor.parse()?;
 
                 let contents: Spanned<Statement> = cursor.parse()?;
@@ -1987,7 +2025,10 @@ pub struct FnDefinition {
 
 impl FnDefinition {
     pub fn bubble_errors(&self, output: &mut Vec<Diagnostic>) {
-        self.parameters.inner().values().for_each(|param| param.bubble_errors(output));
+        self.parameters
+            .inner()
+            .values()
+            .for_each(|param| param.bubble_errors(output));
         self.return_type.bubble_errors(output);
         self.body.bubble_errors(output);
     }
@@ -2060,8 +2101,15 @@ impl Parsable for Spanned<Method> {
 
         let method_span = open.span().to(body.span());
         Ok(Spanned::new(
-            Method {vis, ident, parameters, return_type, implements, body},
-            method_span
+            Method {
+                vis,
+                ident,
+                parameters,
+                return_type,
+                implements,
+                body,
+            },
+            method_span,
         ))
     }
 
@@ -2083,26 +2131,46 @@ impl Parsable for Spanned<MethodParam> {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         if cursor.check(&Token::Keyword(Keyword::LowerSelf)) {
             let s: Spanned<Token![self]> = cursor.parse()?;
-            Ok(Spanned::new(MethodParam::SelfParam{mutability: Mutability::Const, ty: SelfParam::Value}, s.into_span()))
-        }  else if cursor.check(&Token::Punctuation(Punctuation::Star)) {
+            Ok(Spanned::new(
+                MethodParam::SelfParam {
+                    mutability: Mutability::Const,
+                    ty: SelfParam::Value,
+                },
+                s.into_span(),
+            ))
+        } else if cursor.check(&Token::Punctuation(Punctuation::Star)) {
             let open: Spanned<Token![*]> = cursor.parse()?;
             let mutability: Mutability = cursor.parse()?;
             let s: Spanned<Token![self]> = cursor.parse()?;
-            
+
             let param_span = open.span().to(s.span());
-            Ok(Spanned::new(MethodParam::SelfParam{mutability, ty: SelfParam::Reference}, param_span))
-        } else if cursor.check(&Token::Keyword(Keyword::Mut)) && cursor.check2(&Token::Keyword(Keyword::LowerSelf)) {
+            Ok(Spanned::new(
+                MethodParam::SelfParam {
+                    mutability,
+                    ty: SelfParam::Reference,
+                },
+                param_span,
+            ))
+        } else if cursor.check(&Token::Keyword(Keyword::Mut))
+            && cursor.check2(&Token::Keyword(Keyword::LowerSelf))
+        {
             let open: Spanned<Token![mut]> = cursor.parse()?;
             let s: Spanned<Token![self]> = cursor.parse()?;
 
             let param_span = open.span().to(s.span());
-            Ok(Spanned::new(MethodParam::SelfParam{mutability: Mutability::Mut, ty: SelfParam::Value}, param_span))
+            Ok(Spanned::new(
+                MethodParam::SelfParam {
+                    mutability: Mutability::Mut,
+                    ty: SelfParam::Value,
+                },
+                param_span,
+            ))
         } else {
             let (param, span) = cursor.parse::<Spanned<FnParam>>()?.deconstruct();
             Ok(Spanned::new(MethodParam::FnParam(param), span))
         }
     }
-    
+
     fn description(&self) -> &'static str {
         "method parameter"
     }
