@@ -1,9 +1,13 @@
 use crate::diagnostic::Diagnostic;
 
-pub fn resolve() -> Result<TypedNamespace, Vec<Diagnostic>> {
+pub fn resolve() -> Result<Namespace, Vec<Diagnostic>> {
     todo!()
 }
 
-pub struct TypedNamespace {
+pub struct Namespace {
+
+}
+
+pub struct Struct {
 
 }

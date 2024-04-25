@@ -13,7 +13,6 @@ use self::syntax::parse;
 
 mod ascii;
 mod deps;
-mod generator;
 mod symbol_table;
 mod depgraph;
 mod syntax {
@@ -27,6 +26,11 @@ mod frontend {
     pub mod ast {
         pub mod typed;
     }
+}
+
+mod backend {
+    pub mod linker;
+    pub mod codegen;
 }
 
 const SOURCE: &str = "src";
