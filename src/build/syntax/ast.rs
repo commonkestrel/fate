@@ -80,7 +80,7 @@ impl Type {
                 ty.contains_errors() || len.contains_errors()
             },
             Type::FnPtr {params, return_type} => {
-                params.values().any(|ty| ty.contains_errors())
+                params.values().any(|ty| ty.contains_errors()) || return_type.contains_errors()
             },
             Type::Err(_) => true,
         }
