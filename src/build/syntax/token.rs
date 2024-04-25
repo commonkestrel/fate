@@ -92,6 +92,20 @@ macro_rules! parsable {
                     $description
                 }
             }
+
+            impl Parsable for Option<$name> {
+                fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+                    let next = cursor.next().map(Spanned::into_inner);
+                    match next {
+                        Some(Token::$token($inner)) => Ok(Some($name)),
+                        _ => Ok(None),
+                    }
+                }
+
+                fn description(&self) -> &'static str {
+                    $description
+                }
+            }
         )*
     };
     ($($description:literal: $token:ident($inner:pat) => $name:ident{$($v:vis $field:ident: $ty:ty)*}),* $(,)?) => {

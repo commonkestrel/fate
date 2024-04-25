@@ -13,7 +13,7 @@ use super::{
     lex::{self, Delimeter, Keyword, Punctuation, Token},
     parse::{Cursor, Parenthesized, Parsable, Punctuated},
     token::{
-        CloseBrace, CloseBracket, CloseParen, Colon, Comma, DoubleColon, Eq, Gt, Ident, LowerSelf, Mut, OpenBrace, Semicolon
+        CloseBrace, CloseBracket, CloseParen, Colon, Comma, DoubleColon, Eq, Gt, Ident, LowerSelf, Mut, OpenBrace, OpenParen, Semicolon
     },
 };
 
@@ -55,26 +55,51 @@ pub enum Type {
         ty: Box<Spanned<Type>>,
         len: Box<Spanned<Expr>>,
     },
-    Vector(Vec<Spanned<Type>>),
+    Tuple(Vec<Spanned<Type>>),
     Composite {
         ident: Path,
         generics: Vec<Spanned<Type>>,
     },
     BigSelf,
+    FnPtr {
+        params: Punctuated<Spanned<Type>, Token![,]>,
+        return_type: Box<Spanned<Type>>
+    },
     Err(Diagnostic),
 }
 
 impl Type {
+    pub fn contains_errors(&self) -> bool {
+        match self {
+            Type::BigSelf => false,
+            Type::Primitive(_) => false,
+            Type::Composite{ident: _, generics} => generics.iter().any(|gen| gen.contains_errors()),
+            Type::Tuple(types) => types.iter().any(|ty| ty.contains_errors()),
+            Type::Pointer {ty, ..} => ty.contains_errors(),
+            Type::Array { ty, len } => {
+                ty.contains_errors() || len.contains_errors()
+            },
+            Type::FnPtr {params, return_type} => {
+                params.values().any(|ty| ty.contains_errors())
+            },
+            Type::Err(_) => true,
+        }
+    }
+
     pub fn bubble_errors(&self, output: &mut Vec<Diagnostic>) {
         match self {
             Type::BigSelf => {}
             Type::Primitive(_) => {}
             Type::Composite{ident: _, generics} => generics.iter().for_each(|ty| ty.bubble_errors(output)),
-            Type::Vector(types) => types.iter().for_each(|ty| ty.bubble_errors(output)),
+            Type::Tuple(types) => types.iter().for_each(|ty| ty.bubble_errors(output)),
             Type::Pointer { ty, .. } => ty.bubble_errors(output),
             Type::Array { ty, len } => {
                 ty.bubble_errors(output);
                 len.bubble_errors(output);
+            }
+            Type::FnPtr {params, return_type} => {
+                params.values().for_each(|ty| ty.bubble_errors(output));
+                return_type.bubble_errors(output);
             }
             Type::Err(err) => output.push(err.clone()),
         }
@@ -89,6 +114,7 @@ impl Parsable for Spanned<Type> {
             .deconstruct();
         match tok {
             Token::Primitive(ty) => Ok(Spanned::new(Type::Primitive(ty), span)),
+            Token::Keyword(Keyword::UpperSelf) => Ok(Spanned::new(Type::BigSelf, span)),
             Token::Punctuation(Punctuation::Star) => {
                 let mutability = cursor.parse()?;
                 let ty: Spanned<Type> = cursor.parse()?;
@@ -125,7 +151,7 @@ impl Parsable for Spanned<Type> {
                         let close: Spanned<Gt> = cursor.parse()?;
                         let vec_span = span.to(close.span());
 
-                        return Ok(Spanned::new(Type::Vector(types), vec_span));
+                        return Ok(Spanned::new(Type::Tuple(types), vec_span));
                     }
 
                     let ty = cursor.parse()?;
@@ -136,6 +162,58 @@ impl Parsable for Spanned<Type> {
                 }
 
                 Err(spanned_error!(span, "unmatched opening arrow"))
+            }
+            Token::Keyword(Keyword::Fn) => {
+                let open_paren: Spanned<OpenParen> = cursor.parse()?;
+
+                let mut types = Vec::new();
+                let mut last_type = None;
+
+                while let Some(tok) = cursor.peek().cloned() {
+                    match tok.inner() {
+                        Token::Delimeter(Delimeter::CloseParen) => {
+                            cursor.step();
+                            let params = Punctuated::new(types, last_type);
+                            let _: Token![:] = cursor.parse()?;
+                            let ret: Spanned<Type> = cursor.parse()?;
+
+                            return Ok(Spanned::new(
+                                Type::FnPtr{params, return_type: Box::new(ret)},
+                                open_paren.span().to(tok.span())
+                            ));
+                        }
+                        Token::Punctuation(Punctuation::Comma) => {
+                            match last_type.take() {
+                                Some(ty) => types.push((
+                                    ty,
+                                    cursor.parse()?,
+                                )),
+                                None => {
+                                    types.push((
+                                        Spanned::new(Type::Err(spanned_error!(tok.span().clone(), "unmatched duplicate seperator")), tok.into_span()),
+                                        cursor.parse()?
+                                    ))
+                                }
+                            }
+                        }
+                        inner => {
+                            if last_type.is_some() {
+                                return Ok(Spanned::new(Type::Err(spanned_error!(
+                                    tok.span().clone(),
+                                    "expected seperator or closing parenthesis, found {}",
+                                    inner.description()
+                                )), tok.into_span()));
+                            }
+
+                            last_type = Some(match cursor.parse() {
+                                Ok(ty) => ty,
+                                Err(err) => Spanned::new(Type::Err(err), tok.into_span())
+                            });
+                        }
+                    }
+                }
+
+                Ok(Spanned::new(Type::Err(spanned_error!(open_paren.span().clone(), "unmatched opening parenthesis")), open_paren.into_span()))
             }
             Token::Ident(_) => {
                 cursor.step_back();
@@ -496,7 +574,7 @@ impl Parsable for Spanned<Variant> {
 
         let variant_span = match ty {
             VariantType::Void | VariantType::Err(_) => ident.span().clone(),
-            VariantType::Vector(ref types) => ident.span().to(types.span()),
+            VariantType::Tuple(ref types) => ident.span().to(types.span()),
             VariantType::Struct(ref fields) => ident.span().to(fields.span()),
         };
 
@@ -511,7 +589,7 @@ impl Parsable for Spanned<Variant> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum VariantType {
     Void,
-    Vector(Spanned<Punctuated<Spanned<Type>, Comma>>),
+    Tuple(Spanned<Punctuated<Spanned<Type>, Comma>>),
     Struct(Spanned<Punctuated<FieldDef, Comma>>),
     Err(Diagnostic),
 }
@@ -527,7 +605,7 @@ impl VariantType {
 impl Parsable for VariantType {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         match cursor.peek().map(Spanned::inner) {
-            Some(Token::Punctuation(Punctuation::Lt)) => {
+            Some(Token::Delimeter(Delimeter::OpenParen)) => {
                 let open: Spanned<Token![<]> = cursor.parse()?;
 
                 let mut types_inner = Vec::new();
@@ -550,7 +628,7 @@ impl Parsable for VariantType {
                                 )));
                             }
                         },
-                        Token::Punctuation(Punctuation::Gt) => break,
+                        Token::Delimeter(Delimeter::CloseParen) => break,
                         _ => {
                             if last_type.is_some() {
                                 return Ok(VariantType::Err(spanned_error!(
@@ -569,9 +647,9 @@ impl Parsable for VariantType {
 
                 let types = Punctuated::new(types_inner, last_type);
 
-                let close: Spanned<Token![>]> = cursor.parse()?;
+                let close: Spanned<CloseParen> = cursor.parse()?;
 
-                Ok(VariantType::Vector(Spanned::new(
+                Ok(VariantType::Tuple(Spanned::new(
                     types,
                     open.span().to(close.span()),
                 )))
@@ -662,7 +740,7 @@ pub enum Expr {
         ident: Path,
         fields: Punctuated<Spanned<Field>, Token![,]>,
     },
-    Vector(Punctuated<Spanned<Expr>, Token![,]>),
+    Tuple(Punctuated<Spanned<Expr>, Token![,]>),
     Dot(Box<(Spanned<Expr>, Spanned<Ident>)>),
     BinaryOp(Box<BinOp>),
     UnaryOp(Spanned<UnaryOp>, Box<Spanned<Expr>>),
@@ -701,7 +779,7 @@ impl Expr {
             Expr::NamedConstructor { ident, fields } => fields
                 .values()
                 .for_each(|field| field.value.bubble_errors(output)),
-            Expr::Vector(exprs) => exprs.values().for_each(|expr| expr.bubble_errors(output)),
+            Expr::Tuple(exprs) => exprs.values().for_each(|expr| expr.bubble_errors(output)),
             Expr::Dot(dot) => dot.as_ref().0.bubble_errors(output),
             Expr::BinaryOp(op) => {
                 op.left.bubble_errors(output);
@@ -709,6 +787,36 @@ impl Expr {
             }
             Expr::UnaryOp(_, expr) => expr.bubble_errors(output),
             Expr::Err(err) => output.push(err.clone()),
+        }
+    }
+
+    pub fn contains_errors(&self) -> bool {
+        match self {
+            Expr::Immediate(_) => false,
+            Expr::Reference(_) => false,
+            Expr::Str(_) => false,
+            Expr::SelfVar => false,
+            Expr::Cast(_, expr) => expr.contains_errors(),
+            Expr::Call(expr, params) => {
+                expr.contains_errors() ||
+                params
+                    .values()
+                    .any(|param| param.contains_errors())
+            }
+            Expr::Constructor { ident, components } => components
+                .values()
+                .any(|component| component.contains_errors()),
+            Expr::NamedConstructor { ident, fields } => fields
+                .values()
+                .any(|field| field.value.contains_errors()),
+            Expr::Tuple(exprs) => exprs.values().any(|expr| expr.contains_errors()),
+            Expr::Dot(dot) => dot.as_ref().0.contains_errors(),
+            Expr::BinaryOp(op) => {
+                op.left.contains_errors() ||
+                op.right.contains_errors()
+            }
+            Expr::UnaryOp(_, expr) => expr.contains_errors(),
+            Expr::Err(err) => true,
         }
     }
 
@@ -1231,7 +1339,7 @@ impl Expr {
                     Err(err) => return Spanned::new(Expr::Err(err), span),
                 };
 
-                Spanned::new(Expr::Vector(components), span.to(close.span()))
+                Spanned::new(Expr::Tuple(components), span.to(close.span()))
             }
             Token::Delimeter(Delimeter::OpenParen) => {
                 let a = Expr::parse_assignment(cursor);
@@ -1506,6 +1614,7 @@ fn vector_inner<'a>(cursor: &'a mut Cursor, open_span: &Span) -> Result<Cursor<'
         offset += 1;
     }
 
+    debug!("`vector_inner` error").sync_emit();
     Err(spanned_error!(open_span.clone(), "unmatched opening arrow"))
 }
 
@@ -1634,6 +1743,39 @@ impl Statement {
             Statement::Block(content) => content.iter().for_each(|s| s.bubble_errors(output)),
         }
     }
+
+    pub fn contains_errors(&self) -> bool {
+        match self {
+            Statement::Break | Statement::Continue => false,
+            Statement::Expr(expr) => expr.contains_errors(),
+            Statement::If {
+                condition,
+                content,
+                else_block,
+            } => {
+                condition.contains_errors() ||
+                content.contains_errors() || else_block.as_ref().map(|block| block.contains_errors()).unwrap_or(false)
+            }
+            Statement::Loop(content) => content.contains_errors(),
+            Statement::For { contents, header } => {
+                header.init.contains_errors() ||
+                header.check.contains_errors() ||
+                header.post.contains_errors() ||
+
+                contents.contains_errors()
+            }
+            Statement::While { check, contents } => {
+                check.contains_errors() ||
+                contents.contains_errors()
+            }
+            Statement::Let { assignment, ty, .. } => {
+                assignment.contains_errors() ||
+                ty.contains_errors()
+            }
+            Statement::Return(expr) => expr.contains_errors(),
+            Statement::Block(content) => content.iter().any(|s| s.contains_errors()),
+        }
+    }
 }
 
 impl Parsable for Spanned<Statement> {
@@ -1674,13 +1816,37 @@ impl Parsable for Spanned<Statement> {
                 Ok(Spanned::new(Statement::Loop(Box::new(contents)), loop_span))
             }
             Token::Keyword(Keyword::For) => {
-                let init = cursor.parse()?;
+                let _: OpenParen = cursor.parse()?;
+
+                let init: Spanned<Statement> = cursor.parse()?;
+                if init.contains_errors() {
+                    cursor.seek(&Token::Punctuation(Punctuation::Semicolon));
+                }
                 let _: Semicolon = cursor.parse()?;
-                let check = cursor.parse()?;
+                let check: Spanned<Statement> = cursor.parse()?;
+                if check.contains_errors() {
+                    cursor.seek(&Token::Punctuation(Punctuation::Semicolon));
+                }
+                let mut errors = Vec::new();
+                check.bubble_errors(&mut errors);
+
+                for err in errors {
+                    err.sync_emit();
+                }
                 let _: Semicolon = cursor.parse()?;
-                let post = cursor.parse()?;
-                let _: Semicolon = cursor.parse()?;
+                let post: Spanned<Statement> = cursor.parse()?;
+                if post.contains_errors() {
+                    cursor.seek(&Token::Punctuation(Punctuation::Semicolon));
+                }
+                let mut errors = Vec::new();
+                post.bubble_errors(&mut errors);
+
+                for err in errors {
+                    err.sync_emit();
+                }
                 let header = ForHeader { init, check, post };
+                
+                let _: CloseParen = cursor.parse()?;
 
                 let contents: Spanned<Statement> = cursor.parse()?;
                 let for_span = span.to(contents.span());
@@ -1754,7 +1920,6 @@ impl Parsable for Spanned<Statement> {
                 let mut statements = Vec::new();
 
                 while !cursor.at_end() {
-                    let peek = cursor.peek().unwrap();
                     if cursor.check(&Token::Delimeter(Delimeter::CloseBrace)) {
                         let close: Spanned<CloseBrace> = cursor.parse()?;
                         let block_span = span.to(close.span());
@@ -1785,9 +1950,9 @@ impl Parsable for Spanned<Statement> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForHeader {
-    init: Spanned<Expr>,
-    check: Spanned<Expr>,
-    post: Spanned<Expr>,
+    init: Spanned<Statement>,
+    check: Spanned<Statement>,
+    post: Spanned<Statement>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
@@ -1885,7 +2050,7 @@ impl Parsable for Spanned<Method> {
         let return_type = cursor.parse()?;
 
         let implements = if cursor.check(&Token::Keyword(Keyword::Implements)) {
-            cursor.step();
+            spanned_debug!(cursor.next().unwrap().into_span(), "implementing").sync_emit();
             Some(cursor.parse()?)
         } else {
             None

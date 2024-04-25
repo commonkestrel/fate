@@ -198,6 +198,12 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    pub fn seek(&mut self, target: &Token) {
+        while !self.check(target) && self.position <= self.stream.len() {
+            self.position += 1;
+        }
+    }
+
     #[track_caller]
     pub fn slice<R: Into<Range<usize>>>(&mut self, range: R) -> Cursor {
         Cursor::new(
