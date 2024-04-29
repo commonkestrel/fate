@@ -1,14 +1,12 @@
-use indexmap::IndexMap;
-
 use crate::{
-    build::ascii::AsciiStr, debug, diagnostic::{Diagnostic, Reporter}, error, punctuated, seek, span::{Span, Spanned}, spanned_debug, spanned_error, Token
+    build::ascii::AsciiStr, debug, diagnostic::Diagnostic, error, punctuated, seek, span::Spanned, spanned_debug, spanned_error, Token
 };
 
 use super::{
     lex::{self, Delimeter, Keyword, Punctuation, Token},
-    parse::{parenthesized, Cursor, Parenthesized, Parsable, Punctuated},
+    parse::{Cursor, Parenthesized, Parsable, Punctuated},
     token::{
-        CloseBrace, CloseBracket, CloseParen, Colon, Comma, DoubleColon, Eq, Gt, Ident, LowerSelf,
+        CloseBrace, CloseBracket, CloseParen, Colon, Comma, DoubleColon, Eq, Ident,
         Mut, OpenBrace, OpenParen, Semicolon,
     },
 };
@@ -2099,4 +2097,17 @@ impl Parsable for FnCall {
 struct Generic {
     ident: Spanned<Ident>,
     requirements: Punctuated<Path, Token![,]>,
+}
+
+fn parse_generics(cursor: &mut Cursor) -> Vec<Type> {
+    let types = Vec::new();
+
+    if !cursor.check(&Token::Punctuation(Punctuation::Lt)) {
+        return types;
+    }
+
+    cursor.step();
+    
+
+    types
 }

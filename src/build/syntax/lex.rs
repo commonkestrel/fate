@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{
     diagnostic::Diagnostic,
     error,
-    span::{Lookup, Span, Spanned},
+    span::{Lookup, Span, Spanned}, spanned_error,
 };
 
 use async_std::{
@@ -79,7 +79,7 @@ pub fn lex_string(content: &str, source: &str) -> Result<TokenStream, Errors> {
 
 impl Parsable for Spanned<Token> {
     fn parse(cursor: &mut super::parse::Cursor) -> Result<Self, Diagnostic> {
-        cursor.next().ok_or_else(|| error!(""))
+        cursor.next().ok_or_else(|| spanned_error!(cursor.eof_span(), "expected token, found `EOF`"))
     }
 
     fn description(&self) -> &'static str {

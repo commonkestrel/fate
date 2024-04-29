@@ -424,8 +424,6 @@ macro_rules! delimeterized {
             let start = cursor.position;
             let mut depth = 0;
 
-            let tok = Token::Delimeter(Delimeter::OpenParen);
-
             while !cursor.at_end() {
                 match cursor.peek().map(Spanned::inner) {
                     Some($open_inner) => depth += 1,
