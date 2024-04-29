@@ -55,6 +55,12 @@ macro_rules! Token {
     [as] => {$crate::build::syntax::token::As};
     [self] => {$crate::build::syntax::token::LowerSelf};
     [Self] => {$crate::build::syntax::token::UpperSelf};
+    ["("] => {$crate::build::syntax::token::OpenParen};
+    [")"] => {$crate::build::syntax::token::CloseParen};
+    ["["] => {$crate::build::syntax::token::OpenBracket};
+    ["]"] => {$crate::build::syntax::token::CloseBracket};
+    ["{"] => {$crate::build::syntax::token::OpenBrace};
+    ["}"] => {$crate::build::syntax::token::CloseBrace};
 }
 
 macro_rules! parsable {
