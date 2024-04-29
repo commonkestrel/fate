@@ -9,14 +9,13 @@ enum FooBar {
         foo: u8,
         bar: *u24,
     }
-    Baz<u8>,
-    Qux<*u8, u16>
+    Qux(*u8, u16)
 }
 
 fn main(): void {
-    let string: str = "hello world";
+    let string: str = "hello";
 
-    let foobar: FooBar = FooBar::Baz<0, 132>;
+    let foobar: FooBar = FooBar::Baz(0, 132);
     // let bytes: [u8; 5] = [0, 1, 2, 3, 4];
     // match foobar {
     //     Foo => puts("foo"),
@@ -26,11 +25,11 @@ fn main(): void {
     // }
 }
 
-pub fn sin_cos(n: u8): <u8, u8> {
-    return <std::math::sin(n), std::math::cos(n)>;
+pub fn sin_cos(n: u8): (u8, u8) {
+    return (std::math::sin(n), std::math::cos(n));
 }
 
-struct String {
+struct String impl Display {
     ptr: *mut u8,
     capactity: u16,
     len: u16,
@@ -49,12 +48,18 @@ struct String {
         let ptr: *mut u8 = alloc::malloc(s.len());
         return String {
             ptr = ptr,
-            capacity = s.len(),
+            capacity = s.len()
         };
     }
 
+    pub fn map_chars(*self, op: fn(u8): u8): void {
+        for (let mut i: u8 = 0; i < self.len; i += 1;) {
+            self.ptr[i] = op(self.ptr[i]);
+        }
+    }
+
     pub fn display(*self, writer: *mut Writer): void
-        implements Display::display
+        impl Display::display
     {
         writer.write(self.ptr, len);
     }
