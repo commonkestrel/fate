@@ -2,7 +2,7 @@ use crate::span::Span;
 use std::io;
 use std::io::IsTerminal;
 
-use async_std::io::WriteExt;
+use async_std::{io::WriteExt, sync::RwLock};
 use colored::{Color, ColoredString, Colorize};
 
 use std::sync::Arc;
@@ -28,6 +28,22 @@ impl Diagnostic {
             message: message.into(),
             span: Some(span.into()),
             level: Level::Error,
+        }
+    }
+
+    pub fn warn<S: Into<String>>(message: S) -> Self {
+        Diagnostic {
+            message: message.into(),
+            span: None,
+            level: Level::Warn,
+        }
+    }
+
+    pub fn spanned_warn<M: Into<String>, S: Into<Arc<Span>>>(span: S, message: M) -> Self {
+        Diagnostic {
+            message: message.into(),
+            span: Some(span.into()),
+            level: Level::Warn,
         }
     }
 
@@ -167,6 +183,47 @@ impl Level {
     }
 }
 
+#[derive(Clone)]
+pub struct Reporter {
+    diagnostics: Arc<RwLock<Vec<Diagnostic>>>,
+}
+
+impl Reporter {
+    pub fn new() -> Self {
+        Reporter {
+            diagnostics: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    pub async fn report(&self, diag: Diagnostic) {
+        let mut diagnostics = self.diagnostics.write().await;
+        diagnostics.push(diag);
+    }
+
+    pub fn report_sync(&self, diag: Diagnostic) {
+        let mut diagnostics = async_std::task::block_on(self.diagnostics.write());
+        diagnostics.push(diag);
+    }
+
+    pub async fn emit_all(&self) {
+        let mut diagnostics = self.diagnostics.write().await;
+        for diagnostic in diagnostics.drain(..) {
+            diagnostic.emit().await;
+        }
+    }
+
+    pub fn has_errors(&self) -> bool {
+        let diagnostics = async_std::task::block_on(self.diagnostics.read());
+        return diagnostics.iter().any(|diag| diag.level == Level::Error);
+    }
+}
+
+impl Default for Reporter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[macro_export]
 macro_rules! error {
     ($($arg:tt)*) => ($crate::diagnostic::Diagnostic::error(::std::format!($($arg)*)))
@@ -175,6 +232,16 @@ macro_rules! error {
 #[macro_export]
 macro_rules! spanned_error {
     ($span:expr, $($arg:tt)*) => ($crate::diagnostic::Diagnostic::spanned_error($span, ::std::format!($($arg)*)))
+}
+
+#[macro_export]
+macro_rules! warn {
+    ($($arg:tt)*) => ($crate::diagnostic::Diagnostic::warn(::std::format!($($arg)*)))
+}
+
+#[macro_export]
+macro_rules! spanned_warn {
+    ($span:expr, $($arg:tt)*) => ($crate::diagnostic::Diagnostic::spanned_warn($span, ::std::format!($($arg)*)))
 }
 
 #[macro_export]

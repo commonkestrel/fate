@@ -15,20 +15,17 @@ use super::{
     },
 };
 use crate::{
-    diagnostic::Diagnostic,
-    error,
-    span::{Lookup, Span, Spanned},
-    spanned_debug, spanned_error, Token,
+    debug, diagnostic::{Diagnostic, Reporter}, error, span::{Lookup, Span, Spanned}, spanned_debug, spanned_error, warn, Token
 };
 
-pub fn parse(
+pub async fn parse(
     stream: TokenStream,
     home: PathBuf,
     source_name: Arc<String>,
     lookup: Arc<Lookup>,
-) -> Result<Namespace, Vec<Diagnostic>> {
-    let mut cursor = Cursor::new(&stream, source_name, lookup);
-    let mut errors = Vec::new();
+) -> Result<(Namespace, Reporter), Reporter> {
+    let reporter = Reporter::default();
+    let mut cursor = Cursor::new(&stream, source_name, lookup, reporter.clone());
     let mut namespace = Namespace::empty(home);
     let mut visibility = Visibility::Private;
 
@@ -41,7 +38,7 @@ pub fn parse(
                     ret
                 }
                 Err(err) => {
-                    errors.push(err);
+                    reporter.report(err).await;
                     continue;
                 }
             }),
@@ -52,7 +49,7 @@ pub fn parse(
                     ret
                 }
                 Err(err) => {
-                    errors.push(err);
+                    reporter.report(err).await;
                     continue;
                 }
             }),
@@ -63,7 +60,7 @@ pub fn parse(
                     ret
                 }
                 Err(err) => {
-                    errors.push(err);
+                    reporter.report(err).await;
                     continue;
                 }
             }),
@@ -74,7 +71,7 @@ pub fn parse(
                     ret
                 }
                 Err(err) => {
-                    errors.push(err);
+                    reporter.report(err).await;
                     continue;
                 }
             }),
@@ -85,7 +82,7 @@ pub fn parse(
                     ret
                 }
                 Err(err) => {
-                    errors.push(err);
+                    reporter.report(err).await;
                     continue;
                 }
             }),
@@ -96,7 +93,7 @@ pub fn parse(
                     ret
                 }
                 Err(err) => {
-                    errors.push(err);
+                    reporter.report(err).await;
                     continue;
                 }
             }),
@@ -110,7 +107,7 @@ pub fn parse(
                             ret
                         }
                         Err(err) => {
-                            errors.push(err);
+                            reporter.report(err).await;
                             continue;
                         }
                     })
@@ -120,21 +117,24 @@ pub fn parse(
                 visibility = Visibility::Public;
             }
             _ => {
-                errors.push(spanned_error!(
-                    tok.span().clone(),
-                    "unexpected {} in top level section",
-                    tok.description()
-                ));
+                reporter
+                    .report(spanned_error!(
+                        tok.span().clone(),
+                        "unexpected {} in top level section",
+                        tok.description()
+                    ))
+                    .await;
                 cursor.step();
             }
         }
     }
 
-    namespace.bubble_errors(&mut errors);
-    if errors.is_empty() {
-        Ok(namespace)
+    reporter.emit_all().await;
+    debug!("errors: {}", reporter.has_errors()).sync_emit();
+    if reporter.has_errors() {
+        Err(reporter)
     } else {
-        Err(errors)
+        Ok((namespace, reporter))
     }
 }
 
@@ -142,6 +142,7 @@ pub struct Cursor<'a> {
     stream: &'a [Spanned<Token>],
     pub position: usize,
     eof_span: Span,
+    reporter: Reporter,
 }
 
 impl<'a> Cursor<'a> {
@@ -150,6 +151,7 @@ impl<'a> Cursor<'a> {
         stream: &'a [Spanned<Token>],
         source_name: Arc<String>,
         lookup: Arc<Lookup>,
+        reporter: Reporter,
     ) -> Self {
         let end_position = stream
             .last()
@@ -159,6 +161,7 @@ impl<'a> Cursor<'a> {
             stream,
             position: 0,
             eof_span: Span::new(source_name, lookup, end_position),
+            reporter,
         }
     }
 
@@ -230,12 +233,38 @@ impl<'a> Cursor<'a> {
             &self.stream[range.into()],
             self.eof_span.source_name(),
             self.eof_span.lookup(),
+            self.reporter.clone(),
         )
     }
 
     #[inline]
     pub fn eof_span(&self) -> Span {
         self.eof_span.clone()
+    }
+
+    #[inline]
+    pub fn reporter<'r>(&'r self) -> &'r Reporter {
+        &self.reporter
+    }
+
+    #[inline]
+    pub fn take_reporter(&self) -> Reporter {
+        self.reporter.clone()
+    }
+
+    pub fn expect_semicolon(&mut self) {
+        if self.check(&Token::Punctuation(Punctuation::Semicolon)) {
+            self.step();
+        } else {
+            let next_span = match self.peek() {
+                Some(tok) => tok.span().clone(),
+                None => self.eof_span(),
+            };
+            self.reporter.report_sync(spanned_error!(
+                next_span,
+                "expected `;`"
+            ));
+        }
     }
 }
 
@@ -249,8 +278,20 @@ impl<'a> Iterator for Cursor<'a> {
     }
 }
 
+#[macro_export]
+macro_rules! seek {
+    ($cursor:expr, $token:pat) => {
+        while !$cursor.at_end() {
+            if matches!($cursor.peek().map(Spanned::inner), Some($token)) {
+                break;
+            }
+            $cursor.position += 1;
+        }
+    };
+}
+
 pub trait Bubble {
-    fn bubble_errors(&self, output: &mut Vec<Diagnostic>);
+    fn bubble_errors(&self, reporter: &mut Reporter);
 }
 
 pub trait Parsable: Sized {
@@ -283,6 +324,10 @@ macro_rules! delimeterized {
         impl<T> $struct<T> {
             pub fn inner(&self) -> &T {
                 &self.inner
+            }
+
+            pub fn into_inner(self) -> T {
+                self.inner
             }
         }
 
@@ -374,14 +419,36 @@ macro_rules! delimeterized {
             }
         }
 
-        pub fn $fn<'a>(cursor: &'a mut Cursor) -> Result<Cursor<'a>, Diagnostic> {
+        pub fn $fn<'a>(cursor: &'a mut Cursor) -> Result<$struct<Cursor<'a>>, Diagnostic> {
             let open: Spanned<$open> = cursor.parse()?;
+            let start = cursor.position;
+            let mut depth = 0;
 
-            while let Some(tok) = cursor.next() {
+            let tok = Token::Delimeter(Delimeter::OpenParen);
 
+            while !cursor.at_end() {
+                match cursor.peek().map(Spanned::inner) {
+                    Some($open_inner) => depth += 1,
+                    Some($close_inner) => {
+                        if depth == 0 {
+                            let close: Spanned<$close> = cursor.parse()?;
+                            return Ok($struct {
+                                open: open.into_inner(),
+                                inner: cursor.slice(start..cursor.position),
+                                close: close.into_inner(),
+                            });
+                        }
+                        depth -= 1;
+                    }
+                    _ => {}
+                }
+                cursor.position += 1;
             }
 
-            Err(spanned_error!(open.into_span(), concat!("unmatched opening ", $error)))
+            Err(spanned_error!(
+                open.into_span(),
+                concat!("unmatched opening ", $error)
+            ))
         }
     };
 }
@@ -426,6 +493,12 @@ delimeterized!(
     Token::Punctuation(Punctuation::Gt),
     "arrow"
 );
+
+macro_rules! foo {
+    ($foo:expr) => {};
+}
+
+foo!(Token::Delimeter(Delimeter::OpenParen));
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Punctuated<T, S> {
@@ -567,33 +640,6 @@ impl Namespace {
             enums: Vec::new(),
             functions: Vec::new(),
         }
-    }
-
-    fn bubble_errors(&self, output: &mut Vec<Diagnostic>) {
-        self.submodules.iter().for_each(|sm| {
-            sm.0.content.as_ref().map(|nm| nm.bubble_errors(output));
-        });
-        self.statics
-            .iter()
-            .for_each(|st| st.0.value.bubble_errors(output));
-        self.structs.iter().for_each(|st| {
-            st.0.fields
-                .values()
-                .for_each(|def| def.ty.bubble_errors(output))
-        });
-        self.unions.iter().for_each(|un| {
-            un.0.fields
-                .values()
-                .for_each(|def| def.ty.bubble_errors(output))
-        });
-        self.enums.iter().for_each(|en| {
-            en.0.variants
-                .values()
-                .for_each(|var| var.ty.bubble_errors(output))
-        });
-        self.functions
-            .iter()
-            .for_each(|fu| fu.0.bubble_errors(output));
     }
 }
 

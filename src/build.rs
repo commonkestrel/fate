@@ -97,17 +97,17 @@ pub async fn build(args: BuildArgs) -> Result<(), BuildError> {
     //     );
     // }
 
-    let namespace = match parse::parse(
+    let (namespace, mut reporter) = match parse::parse(
         root_stream.stream,
         home_path,
         root_stream.source,
         root_stream.lookup,
-    ) {
+    )
+    .await
+    {
         Ok(stream) => stream,
-        Err(errors) => {
-            for err in errors {
-                err.emit().await;
-            }
+        Err(reporter) => {
+            reporter.emit_all().await;
 
             error!("build failed due to previous errors").emit().await;
 

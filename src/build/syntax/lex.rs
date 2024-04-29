@@ -116,7 +116,6 @@ pub enum Token {
     #[token("let", |_| Keyword::Let)]
     #[token("namespace", |_| Keyword::Namespace)]
     #[token("as", |_| Keyword::As)]
-    #[token("implements", |_| Keyword::Implements)]
     #[token("self", |_| Keyword::LowerSelf)]
     #[token("Self", |_| Keyword::UpperSelf)]
     Keyword(Keyword),
@@ -324,7 +323,6 @@ pub enum Keyword {
     Let,
     Namespace,
     As,
-    Implements,
     LowerSelf,
     UpperSelf,
 }
@@ -354,7 +352,6 @@ impl Keyword {
             Keyword::Let => "keyword `let`",
             Keyword::Namespace => "keyword `namespace`",
             Keyword::As => "keyword `as`",
-            Keyword::Implements => "keyword `implements`",
             Keyword::LowerSelf => "keyword `self`",
             Keyword::UpperSelf => "keyword `Self`",
         }
