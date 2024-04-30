@@ -3,13 +3,27 @@ use std::io::puts;
 use std::io::Display;
 use std::io::Writer;
 
-enum FooBar {
-    Foo,
-    Bar {
-        foo: u8,
-        bar: *u24,
+enum Option<T> {
+    Some(T),
+    None,
+
+    pub fn is_some(*self): bool {
+        // match (*self) {
+        //     Self::Some(_): return true;
+        //     Self::None: return false;
+        // }
     }
-    Qux(*u8, u16)
+
+    pub fn is_none(*self): bool {
+        // return !self.is_some();
+    }
+
+    pub fn map<R>(self, op: fn(T): R): Option<R> {
+        // match (self) {
+        //     Some(param): return Some(op(param));
+        //     None: return None;
+        // }
+    }
 }
 
 fn main(): void {
@@ -29,7 +43,7 @@ pub fn sin_cos(n: u8): (u8, u8) {
     return (std::math::sin(n), std::math::cos(n));
 }
 
-struct String impl Display {
+struct String<T, S> impl Display {
     ptr: *mut u8,
     capactity: u16,
     len: u16,
