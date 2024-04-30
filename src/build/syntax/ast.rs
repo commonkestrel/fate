@@ -1,5 +1,5 @@
 use crate::{
-    build::ascii::AsciiStr, debug, diagnostic::Diagnostic, error, punctuated, seek, span::Spanned, spanned_debug, spanned_error, Token
+    build::ascii::AsciiStr, debug, diagnostic::Diagnostic, error, punctuated, seek, span::{Span, Spanned}, spanned_debug, spanned_error, Token
 };
 
 use super::{
@@ -16,15 +16,33 @@ pub struct Path {
     inner: Punctuated<Spanned<Ident>, DoubleColon>,
 }
 
+impl Path {
+    pub fn span(&self) -> Span {
+        self.inner.first().unwrap().span().to(self.inner.last().unwrap().span())
+    }
+}
+
 impl Parsable for Path {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
-        let inner = punctuated!(
-            cursor,
-            Token::Ident(_),
-            Token::Punctuation(Punctuation::DoubleColon)
-        )?;
+        let mut inner = Vec::new();
+        let mut last = Some(cursor.parse()?);
+        while let Some(tok) = cursor.peek() {
+            match tok.inner() {
+                Token::Ident(_) => last = Some(cursor.parse()?),
+                Token::Punctuation(Punctuation::DoubleColon) => match last.take() {
+                    Some(l) => inner.push((l, cursor.parse()?)),
+                    None => {
+                        return Err(spanned_error!(
+                            tok.span().clone(),
+                            "unexpected duplicate seperator",
+                        ))
+                    }
+                },
+                _ => break,
+            }
+        }
 
-        Ok(Path { inner })
+        Ok(Path {inner: Punctuated::new(inner, last)})
     }
 
     fn description(&self) -> &'static str {
@@ -258,22 +276,30 @@ impl Parsable for Spanned<Type> {
                 let (composite, span) = if cursor.check(&Token::Punctuation(Punctuation::Lt)) {
                     let open: Spanned<Token![<]> = cursor.parse()?;
                     let mut types: Vec<Spanned<Type>> = Vec::new();
-                    let mut comma = false;
+
+                    // Set comma to `true` to account for the initial missing comma
+                    let mut comma = true;
 
                     while let Some(tok) = cursor.peek() {
+                        let span = tok.span().clone();
                         match tok.inner() {
                             Token::Punctuation(Punctuation::Gt) => {
+                                cursor.step();
                                 return Ok(Spanned::new(
                                     Type::Composite {
                                         ident: path.into(),
                                         generics: types,
                                     },
-                                    open.span().to(tok.span()),
+                                    open.span().to(&span),
                                 ))
                             }
-                            Token::Punctuation(Punctuation::Comma) => comma = true,
+                            Token::Punctuation(Punctuation::Comma) => {
+                                cursor.step();
+                                comma = true;
+                            },
                             _ => {
-                                let span = tok.span().clone();
+                                spanned_debug!(span.clone(), "_! ").sync_emit();
+
                                 if !comma {
                                     cursor.reporter().report_sync(spanned_error!(
                                         span.clone(),
@@ -330,6 +356,7 @@ impl Parsable for Spanned<Type> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
     pub ident: Spanned<Ident>,
+    pub generics: Vec<Spanned<Generic>>,
     pub implements: Punctuated<Path, Token![,]>,
     pub fields: Punctuated<FieldDef, Comma>,
     pub methods: Vec<Spanned<Method>>,
@@ -339,6 +366,14 @@ impl Parsable for Spanned<Struct> {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         let open: Spanned<Token![struct]> = cursor.parse()?;
         let ident: Spanned<Ident> = cursor.parse()?;
+
+        let generics = match parse_generics(cursor) {
+            Ok(generics) => generics,
+            Err(_) => {
+                seek!(cursor, Token::Punctuation(Punctuation::Semicolon) | Token::Keyword(Keyword::Impl) | Token::Delimeter(Delimeter::OpenBrace));
+                Vec::new()
+            }
+        };
 
         let implements = if cursor.check(&Token::Keyword(Keyword::Impl)) {
             cursor.step();
@@ -390,6 +425,7 @@ impl Parsable for Spanned<Struct> {
         Ok(Spanned::new(
             Struct {
                 ident,
+                generics,
                 implements,
                 fields,
                 methods,
@@ -542,24 +578,79 @@ impl Parsable for Spanned<Field> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Enum {
     pub ident: Spanned<Ident>,
+    pub generics: Vec<Spanned<Generic>>,
+    pub implements: Punctuated<Path, Token![,]>,
     pub variants: Punctuated<Spanned<Variant>, Comma>,
+    pub methods: Vec<Spanned<Method>>,
 }
 
 impl Parsable for Spanned<Enum> {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         let open: Spanned<Token![enum]> = cursor.parse()?;
         let ident = cursor.parse()?;
+
+        let generics = match parse_generics(cursor) {
+            Ok(generics) => generics,
+            Err(_) => {
+                seek!(cursor, Token::Punctuation(Punctuation::Semicolon) | Token::Keyword(Keyword::Impl) | Token::Delimeter(Delimeter::OpenBrace));
+                Vec::new()
+            }
+        };
+
+        let implements = if cursor.check(&Token::Keyword(Keyword::Impl)) {
+            cursor.step();
+
+            punctuated!(
+                cursor,
+                !Token::Delimeter(Delimeter::OpenBrace)
+                    | Token::Punctuation(Punctuation::Semicolon),
+                Token::Punctuation(Punctuation::Comma)
+            )?
+        } else {
+            Punctuated::empty()
+        };
+
         let _: OpenBrace = cursor.parse()?;
-        let variants = punctuated!(
+        let variants =  match punctuated!(
             cursor,
-            !Token::Delimeter(Delimeter::CloseBrace),
+            !Token::Delimeter(Delimeter::CloseBrace) | Token::Keyword(Keyword::Pub) | Token::Keyword(Keyword::Fn),
             Token::Punctuation(Punctuation::Comma)
-        )?;
+        ) {
+            Ok(vars) => vars,
+            Err(err) => {
+                cursor.reporter().report_sync(err);
+                seek!(cursor, Token::Keyword(Keyword::Pub) | Token::Keyword(Keyword::Fn) | Token::Delimeter(Delimeter::CloseBrace));
+                Punctuated::new(Vec::new(), None)
+            }
+        };
+
+        let mut methods = Vec::new();
+
+        while !cursor.at_end() {
+            if cursor.check(&Token::Delimeter(Delimeter::CloseBrace)) {
+                break;
+            }
+
+            match cursor.parse::<Spanned<Method>>() {
+                Ok(method) => methods.push(method),
+                Err(err) => {
+                    cursor.reporter().report_sync(err);
+                    seek!(cursor, Token::Delimeter(Delimeter::CloseBrace));
+                    break;
+                }
+            }
+        }
 
         let close: Spanned<CloseBrace> = cursor.parse()?;
 
         Ok(Spanned::new(
-            Enum { ident, variants },
+            Enum { 
+                ident,
+                generics,
+                implements,
+                variants,
+                methods,
+            },
             open.span().to(close.span()),
         ))
     }
@@ -1868,6 +1959,7 @@ impl Parsable for Mutability {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnDefinition {
     pub ident: Spanned<Ident>,
+    pub generics: Vec<Spanned<Generic>>,
     pub parameters: Parenthesized<Punctuated<FnParam, Comma>>,
     pub return_type: Spanned<Type>,
     pub body: Spanned<Statement>,
@@ -1877,6 +1969,15 @@ impl Parsable for Spanned<FnDefinition> {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         let open: Spanned<Token![fn]> = cursor.parse()?;
         let ident: Spanned<Ident> = cursor.parse()?;
+
+        let generics = match parse_generics(cursor) {
+            Ok(generics) => generics,
+            Err(_) => {
+                seek!(cursor, Token::Punctuation(Punctuation::Semicolon) | Token::Keyword(Keyword::Impl) | Token::Delimeter(Delimeter::OpenBrace));
+                Vec::new()
+            }
+        };
+
         let parameters: Parenthesized<Punctuated<FnParam, Comma>> = cursor.parse()?;
 
         let return_type = if cursor.check(&Token::Punctuation(Punctuation::Colon)) {
@@ -1898,6 +1999,7 @@ impl Parsable for Spanned<FnDefinition> {
         Ok(Spanned::new(
             FnDefinition {
                 ident,
+                generics,
                 parameters,
                 return_type,
                 body,
@@ -1915,6 +2017,7 @@ impl Parsable for Spanned<FnDefinition> {
 pub struct Method {
     pub vis: Visibility,
     pub ident: Spanned<Ident>,
+    pub generics: Vec<Spanned<Generic>>,
     pub parameters: Parenthesized<Punctuated<Spanned<MethodParam>, Token![,]>>,
     pub return_type: Spanned<Type>,
     pub implements: Option<Path>,
@@ -1926,6 +2029,15 @@ impl Parsable for Spanned<Method> {
         let vis: Visibility = cursor.parse()?;
         let open: Spanned<Token![fn]> = cursor.parse()?;
         let ident: Spanned<Ident> = cursor.parse()?;
+
+        let generics = match parse_generics(cursor) {
+            Ok(generics) => generics,
+            Err(_) => {
+                seek!(cursor, Token::Punctuation(Punctuation::Semicolon) | Token::Keyword(Keyword::Impl) | Token::Delimeter(Delimeter::OpenBrace));
+                Vec::new()
+            }
+        };
+
         let parameters = cursor.parse()?;
 
         let _: Token![:] = cursor.parse()?;
@@ -1945,6 +2057,7 @@ impl Parsable for Spanned<Method> {
             Method {
                 vis,
                 ident,
+                generics,
                 parameters,
                 return_type,
                 implements,
@@ -2094,20 +2207,100 @@ impl Parsable for FnCall {
     }
 }
 
-struct Generic {
+#[derive(Debug, Clone, PartialEq)]
+pub struct Generic {
     ident: Spanned<Ident>,
-    requirements: Punctuated<Path, Token![,]>,
+    requirements: Punctuated<Path, Token![+]>,
 }
 
-fn parse_generics(cursor: &mut Cursor) -> Vec<Type> {
-    let types = Vec::new();
+impl Parsable for Spanned<Generic> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let ident: Spanned<Ident> = cursor.parse()?;
 
-    if !cursor.check(&Token::Punctuation(Punctuation::Lt)) {
-        return types;
+        let (requirements, span) = if cursor.check(&Token::Punctuation(Punctuation::Colon)) {
+            cursor.step();
+
+            let requirements = match punctuated!(
+                cursor,
+                !Token::Punctuation(Punctuation::Gt),
+                Token::Punctuation(Punctuation::Plus)
+            ) {
+                Ok(requirements) => requirements,
+                Err(err) => {
+                    seek!(cursor, Token::Punctuation(Punctuation::Gt));
+                    return Err(err);
+                }
+            };
+
+            let span = requirements.last().map(|last: &Path| ident.span().to(&last.span())).unwrap_or_else(|| ident.span().clone());
+            (requirements, span)
+        } else {
+            (Punctuated::empty(), ident.span().clone())
+        };
+
+        Ok(Spanned::new(Generic { ident, requirements }, span))
     }
 
-    cursor.step();
-    
+    fn description(&self) -> &'static str {
+        "generic"
+    }
+}
 
-    types
+fn parse_generics(cursor: &mut Cursor) -> Result<Vec<Spanned<Generic>>, ()> {
+    let mut types = Vec::new();
+
+    // Just using parse to check if there is even generics specified
+    let open: Spanned<Token![<]> = match cursor.parse() {
+        Ok(open) => open,
+        Err(_) => {
+            cursor.step_back();
+            return Ok(types)
+        },
+    };
+
+    spanned_debug!(open.span().clone(), "parsing generics");
+
+    // Set comma to true initially so an error is not raised
+    let mut comma = true;
+
+    while let Some(tok) = cursor.peek() {
+        match tok.inner() {
+            Token::Punctuation(Punctuation::Gt) => {
+                cursor.step();
+                return Ok(types)
+            }
+            Token::Punctuation(Punctuation::Comma) => {
+                comma = true;
+                cursor.step();
+            },
+            _ => {
+                let span = tok.span().clone();
+                if !comma {
+                    cursor.reporter().report_sync(spanned_error!(
+                        span.clone(),
+                        "expected comma between types, found {}",
+                        tok.inner().description()
+                    ));
+
+                    return Err(());
+                }
+                comma = false;
+
+                types.push(match cursor.parse() {
+                    Ok(ty) => ty,
+                    Err(err) => {
+                        cursor.reporter().report_sync(err);
+                        return Err(())
+                    }
+                });
+            }
+        }
+    }
+
+    let open_span = open.into_span();
+    cursor
+        .reporter()
+        .report_sync(spanned_error!(open_span.clone(), "unmatched opening arrow"));
+
+    Err(())
 }

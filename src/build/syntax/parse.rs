@@ -529,6 +529,12 @@ impl<T, S> Punctuated<T, S> {
             .or_else(|| self.inner.last().map(|both| &both.0))
     }
 
+    pub fn first(&self) -> Option<&T> {
+        self.inner.get(0)
+            .map(|both| &both.0)
+            .or_else(|| (*self.last).as_ref())
+    }
+
     pub fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &T> + 'a> {
         Box::new(
             self.inner
@@ -593,6 +599,7 @@ macro_rules! punctuated {
     ($cursor:expr, !$end:pat, $seperator:pat) => {{
         let mut inner = Vec::new();
         let mut last = None;
+        let mut err = None;
 
         while let Some(tok) = $cursor.peek() {
             match tok.inner() {
@@ -600,17 +607,22 @@ macro_rules! punctuated {
                 $seperator => match last.take() {
                     Some(l) => inner.push((l, $cursor.parse()?)),
                     None => {
-                        return Err($crate::spanned_error!(
-                            tok.span().clone(),
-                            "unexpected duplicate seperator"
-                        ))
+                        err = Some(tok.span().clone());
+                        break;
                     }
                 },
                 _ => last = Some($cursor.parse()?),
             }
         }
-
-        Ok(Punctuated::new(inner, last))
+        
+        if let Some(span) = err {
+            Err($crate::spanned_error!(
+                span,
+                "unexpected duplicate seperator"
+            ))
+        } else {
+            Ok(Punctuated::new(inner, last))
+        }
     }};
 }
 
