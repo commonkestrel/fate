@@ -133,8 +133,6 @@ pub async fn parse(
         }
     }
 
-    reporter.emit_all().await;
-
     if reporter.has_errors() {
         Err(reporter)
     } else {
@@ -577,7 +575,7 @@ impl<T: Parsable, S: Parsable> Parsable for Punctuated<T, S> {
 
 #[macro_export]
 macro_rules! punctuated {
-    ($cursor:expr, $content:pat, $seperator:pat) => {{
+    ($cursor:expr, $content:pat, $seperator:pat$(,)?) => {{
         let mut inner = Vec::new();
         let mut last = None;
 
