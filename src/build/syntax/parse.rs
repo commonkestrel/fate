@@ -15,7 +15,11 @@ use super::{
     },
 };
 use crate::{
-    debug, diagnostic::{Diagnostic, Reporter}, error, span::{Lookup, Span, Spanned}, spanned_debug, spanned_error, warn, Token
+    debug,
+    diagnostic::{Diagnostic, Reporter},
+    error,
+    span::{Lookup, Span, Spanned},
+    spanned_debug, spanned_error, warn, Token,
 };
 
 pub async fn parse(
@@ -130,7 +134,7 @@ pub async fn parse(
     }
 
     reporter.emit_all().await;
-    debug!("errors: {}", reporter.has_errors()).sync_emit();
+
     if reporter.has_errors() {
         Err(reporter)
     } else {
@@ -260,10 +264,8 @@ impl<'a> Cursor<'a> {
                 Some(tok) => tok.span().clone(),
                 None => self.eof_span(),
             };
-            self.reporter.report_sync(spanned_error!(
-                next_span,
-                "expected `;`"
-            ));
+            self.reporter
+                .report_sync(spanned_error!(next_span, "expected `;`"));
         }
     }
 }
@@ -530,7 +532,8 @@ impl<T, S> Punctuated<T, S> {
     }
 
     pub fn first(&self) -> Option<&T> {
-        self.inner.get(0)
+        self.inner
+            .get(0)
             .map(|both| &both.0)
             .or_else(|| (*self.last).as_ref())
     }
@@ -614,7 +617,7 @@ macro_rules! punctuated {
                 _ => last = Some($cursor.parse()?),
             }
         }
-        
+
         if let Some(span) = err {
             Err($crate::spanned_error!(
                 span,
