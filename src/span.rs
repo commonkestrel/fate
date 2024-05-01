@@ -1,4 +1,5 @@
 use std::{
+    fmt::{Debug, Formatter},
     borrow,
     ops::{self, Range},
     sync::Arc,
@@ -6,7 +7,7 @@ use std::{
 
 use colored::{Color, Colorize};
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Clone)]
 pub struct Spanned<T> {
     inner: T,
     span: Span,
@@ -53,6 +54,12 @@ impl<T> Spanned<T> {
         M: FnOnce(T) -> O,
     {
         Spanned::new(map(self.inner), self.span)
+    }
+}
+
+impl<T: Debug> Debug for Spanned<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
+        write!(f, "{:?}", self.inner())
     }
 }
 
