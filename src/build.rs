@@ -1,5 +1,4 @@
 use crate::{
-    build::syntax::lex::Token,
     cfg::{Config, ConfigError, ProjectType},
     error,
 };
@@ -117,9 +116,13 @@ pub async fn build(args: BuildArgs) -> Result<(), BuildError> {
 
     // println!("{functions:#?}");
     println!(
-        "    {} building `{}` in {}",
+        "    {} building {} `{}` in {}",
         "Finished".bold().green(),
-        root_path.display(),
+        match cfg.project.ty {
+            ProjectType::Exe => "binary",
+            ProjectType::Lib => "library",
+        },
+        cfg.project.name,
         elapsed(start.elapsed()),
     );
 
