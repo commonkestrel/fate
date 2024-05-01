@@ -3,24 +3,26 @@ use std::io::puts;
 use std::io::Display;
 use std::io::Writer;
 
+static COUNT: [u8; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
 enum Option<T> {
     Some(T),
     None,
 
     pub fn is_some(*self): bool {
         // match (*self) {
-        //     Self::Some(_): return true;
-        //     Self::None: return false;
+        //     Option::Some: return true;
+        //     Option::None: return false;
         // }
     }
 
     pub fn is_none(*self): bool {
-        // return !self.is_some();
+        return !self.is_some();
     }
 
     pub fn map<R>(self, op: fn(T): R): Option<R> {
         // match (self) {
-        //     Some(param): return Some(op(param));
+        //     Some: return Some(op(param));
         //     None: return None;
         // }
     }
