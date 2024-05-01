@@ -18,23 +18,36 @@ use super::{
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Path {
+    first: Spanned<PathStarter>,
     inner: Punctuated<Spanned<Ident>, DoubleColon>,
 }
 
 impl Path {
     pub fn span(&self) -> Span {
-        self.inner
-            .first()
-            .unwrap()
-            .span()
-            .to(self.inner.last().unwrap().span())
+        if let Some(id) = self.inner.last() {
+            self.first.span().to(id.span())
+        } else {
+            self.first.span().clone()
+        }
     }
 }
 
 impl Parsable for Path {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let first = cursor.parse()?;
+
+        if !cursor.check(&Token::Punctuation(Punctuation::DoubleColon)) {
+            return Ok(Path {
+                first,
+                inner: Punctuated::empty(),
+            });
+        }
+
+        cursor.step();
+
         let mut inner = Vec::new();
-        let mut last = Some(cursor.parse()?);
+        let mut last = None;
+
         while let Some(tok) = cursor.peek() {
             match tok.inner() {
                 Token::Ident(_) => last = Some(cursor.parse()?),
@@ -52,6 +65,7 @@ impl Parsable for Path {
         }
 
         Ok(Path {
+            first,
             inner: Punctuated::new(inner, last),
         })
     }
@@ -61,9 +75,33 @@ impl Parsable for Path {
     }
 }
 
-impl From<Punctuated<Spanned<Ident>, DoubleColon>> for Path {
-    fn from(value: Punctuated<Spanned<Ident>, DoubleColon>) -> Self {
-        Path { inner: value }
+#[derive(Debug, Clone, PartialEq)]
+pub enum PathStarter {
+    Ident(Ident),
+    BigSelf,
+}
+
+impl Parsable for Spanned<PathStarter> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let tok = cursor.peek().ok_or_else(|| spanned_error!(cursor.eof_span(), "expected path, found `EOF`"))?;
+        let span = tok.span().clone();
+
+        match tok.inner() {
+            Token::Keyword(Keyword::UpperSelf) => {
+                cursor.step();
+                Ok(Spanned::new(PathStarter::BigSelf, span))
+            }
+            Token::Ident(id) => {
+                let ident = Ident {symbol: *id};
+                cursor.step();
+                Ok(Spanned::new(PathStarter::Ident(ident), span))
+            }
+            _ => Err(spanned_error!(span, "expected path, found {}", tok.inner().description()))
+        }
+    }
+
+    fn description(&self) -> &'static str {
+        "path"
     }
 }
 
@@ -235,54 +273,13 @@ impl Parsable for Spanned<Type> {
             Token::Ident(_) => {
                 cursor.step_back();
 
-                let mut path_inner = Vec::new();
-                let mut last_ident: Option<Spanned<Ident>> = None;
-
-                while let Some(tok) = cursor.peek().cloned() {
-                    match tok.inner() {
-                        Token::Ident(_) => {
-                            if last_ident.is_some() {
-                                cursor.reporter().report_sync(spanned_error!(
-                                    tok.span().clone(),
-                                    "expected seperator, found duplicate ident"
-                                ));
-
-                                return Ok(Spanned::new(Type::Err, tok.span().clone()));
-                            }
-
-                            last_ident = Some(match cursor.parse() {
-                                Ok(ident) => ident,
-                                Err(err) => {
-                                    cursor.reporter().report_sync(err);
-                                    return Ok(Spanned::new(Type::Err, tok.into_span()));
-                                }
-                            });
-                        }
-                        Token::Punctuation(Punctuation::DoubleColon) => match last_ident.take() {
-                            Some(l) => path_inner.push((
-                                l,
-                                match cursor.parse() {
-                                    Ok(field) => field,
-                                    Err(err) => {
-                                        cursor.reporter().report_sync(err);
-                                        return Ok(Spanned::new(Type::Err, tok.into_span()));
-                                    }
-                                },
-                            )),
-                            None => {
-                                cursor.reporter().report_sync(spanned_error!(
-                                    tok.span().clone(),
-                                    "unexpected duplicate seperator"
-                                ));
-
-                                return Ok(Spanned::new(Type::Err, tok.into_span()));
-                            }
-                        },
-                        _ => break,
+                let path: Path = match cursor.parse() {
+                    Ok(path) => path,
+                    Err(err) => {
+                        cursor.reporter().report_sync(err);
+                        return Ok(Spanned::new(Type::Err, span))
                     }
-                }
-
-                let path = Punctuated::new(path_inner, last_ident);
+                };
 
                 let (composite, span) = if cursor.check(&Token::Punctuation(Punctuation::Lt)) {
                     let open: Spanned<Token![<]> = cursor.parse()?;
@@ -338,9 +335,9 @@ impl Parsable for Spanned<Type> {
 
                     (Type::Err, open_span)
                 } else {
-                    let path_span = span.to(path.last().unwrap().span());
+                    let path_span = path.span();
                     let composite = Type::Composite {
-                        ident: path.into(),
+                        ident: path,
                         generics: Vec::new(),
                     };
 
@@ -1605,54 +1602,13 @@ impl Expr {
             Token::Ident(_) => {
                 cursor.step_back();
 
-                let mut path_inner = Vec::new();
-                let mut last_ident: Option<Spanned<Ident>> = None;
-
-                while let Some(tok) = cursor.peek().cloned() {
-                    match tok.inner() {
-                        Token::Ident(_) => {
-                            if last_ident.is_some() {
-                                cursor.reporter().report_sync(spanned_error!(
-                                    tok.span().clone(),
-                                    "expected seperator, found duplicate ident"
-                                ));
-
-                                return Spanned::new(Expr::Err, tok.span().clone());
-                            }
-
-                            last_ident = Some(match cursor.parse() {
-                                Ok(ident) => ident,
-                                Err(err) => {
-                                    cursor.reporter().report_sync(err);
-                                    return Spanned::new(Expr::Err, tok.into_span());
-                                }
-                            });
-                        }
-                        Token::Punctuation(Punctuation::DoubleColon) => match last_ident.take() {
-                            Some(l) => path_inner.push((
-                                l,
-                                match cursor.parse() {
-                                    Ok(field) => field,
-                                    Err(err) => {
-                                        cursor.reporter().report_sync(err);
-                                        return Spanned::new(Expr::Err, tok.into_span());
-                                    }
-                                },
-                            )),
-                            None => {
-                                cursor.reporter().report_sync(spanned_error!(
-                                    tok.span().clone(),
-                                    "unexpected duplicate seperator"
-                                ));
-
-                                return Spanned::new(Expr::Err, tok.into_span());
-                            }
-                        },
-                        _ => break,
+                let path = match cursor.parse() {
+                    Ok(path) => path,
+                    Err(err) => {
+                        cursor.reporter().report_sync(err);
+                        return Spanned::new(Expr::Err, span);
                     }
-                }
-
-                let path = Punctuated::new(path_inner, last_ident);
+                };
 
                 match cursor.peek().map(Spanned::inner) {
                     Some(Token::Delimeter(Delimeter::OpenBrace)) => {
@@ -1708,15 +1664,15 @@ impl Expr {
 
                         Spanned::new(
                             Expr::NamedConstructor {
-                                ident: path.into(),
+                                ident: path,
                                 fields,
                             },
                             span.to(close.span()),
                         )
                     }
                     _ => {
-                        let path_span = span.to(path.last().unwrap().span());
-                        Spanned::new(Expr::Reference(path.into()), path_span)
+                        let path_span = path.span();
+                        Spanned::new(Expr::Reference(path), path_span)
                     }
                 }
             }
@@ -2559,18 +2515,12 @@ pub enum Pattern {
     Array(Vec<Spanned<Pattern>>),
     NamedTuple {
         path: Path,
-        patterns: Vec<Spanned<Pattern>>,
+        patterns: Punctuated<Spanned<Pattern>, Token![,]>,
     },
     Struct {
         path: Path,
-        fields: Vec<Spanned<StructPat>>,
+        fields: Punctuated<StructPat, Token![,]>,
     },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct StructPat {
-    ident: Spanned<Ident>,
-    pattern: Spanned<Pattern>,
 }
 
 impl Parsable for Spanned<Pattern> {
@@ -2623,7 +2573,7 @@ impl Parsable for Spanned<Pattern> {
 
                 Err(spanned_error!(span, "unmatched opening bracket"))
             }
-            Token::Ident(_) => {
+            Token::Ident(_) | Token::Keyword(Keyword::UpperSelf) => {
                 cursor.step_back();
 
                 let path: Path = cursor.parse()?;
@@ -2631,10 +2581,42 @@ impl Parsable for Spanned<Pattern> {
                 if let Some(tok) = cursor.peek() {
                     match tok.inner() {
                         Token::Delimeter(Delimeter::OpenParen) => {
-                            todo!() // TODO: Implement `NamedTuple`
+                            // Step past opening parenthesis
+                            cursor.step();
+
+                            let components = match punctuated!(
+                                cursor,
+                                !Token::Delimeter(Delimeter::CloseParen),
+                                Token::Punctuation(Punctuation::Comma)
+                            ) {
+                                Ok(components) => components,
+                                Err(err) => {
+                                    cursor.reporter().report_sync(err);
+                                    cursor.seek(&Token::Delimeter(Delimeter::CloseParen));
+                                    Punctuated::empty()
+                                }
+                            };
+
+                            let close: Spanned<Token![")"]> = cursor.parse()?;
+
+                            return Ok(Spanned::new(Pattern::NamedTuple{
+                                path,
+                                patterns: components,
+                            }, span.to(close.span())));
                         }
                         Token::Delimeter(Delimeter::OpenBrace) => {
-                            todo!() // TODO: Implement `Struct`
+                            let fields = punctuated!(
+                                cursor,
+                                !Token::Delimeter(Delimeter::CloseBrace),
+                                Token::Punctuation(Punctuation::Comma)
+                            )?;
+
+                            let close: Spanned<Token!["}"]> = cursor.parse()?;
+
+                            return Ok(Spanned::new(Pattern::Struct {
+                                path,
+                                fields,
+                            }, span.to(close.span())))
                         }
                         _ => {}
                     }
@@ -2656,5 +2638,34 @@ impl Parsable for Spanned<Pattern> {
 
     fn description(&self) -> &'static str {
         "pattern"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructPat {
+    ident: Spanned<Ident>,
+    pattern: Spanned<Pattern>,
+}
+
+impl Parsable for StructPat {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let ident: Spanned<Ident> = cursor.parse()?;
+
+        let pattern = if cursor.check(&Token::Punctuation(Punctuation::Colon)) {
+            cursor.step();
+            cursor.parse()?
+        } else {
+            // Just return bind since we are binding to this ident anyways
+            Spanned::new(Pattern::Bind(Path {
+                first: Spanned::new(PathStarter::Ident(ident.inner().clone()), ident.span().clone()),
+                inner: Punctuated::empty()
+            }), ident.span().clone())
+        };
+
+        Ok(StructPat {ident, pattern})
+    }
+
+    fn description(&self) -> &'static str {
+        "struct pattern"
     }
 }
