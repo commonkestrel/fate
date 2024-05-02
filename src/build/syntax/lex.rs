@@ -301,7 +301,7 @@ impl Token {
     }
 
     fn ident(lex: &mut Lexer<Token>) -> SymbolRef {
-        lex.extras.get_or_insert(lex.slice())
+        lex.extras.find_or_insert(lex.slice())
     }
 }
 

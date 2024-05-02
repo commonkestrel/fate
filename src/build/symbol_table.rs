@@ -1,3 +1,4 @@
+#[derive(Debug, Clone, PartialEq)]
 pub struct SymbolTable {
     symbols: Vec<String>,
 }
@@ -9,7 +10,7 @@ impl SymbolTable {
         }
     }
 
-    pub fn get_or_insert(&mut self, symbol: &str) -> SymbolRef {
+    pub fn find_or_insert(&mut self, symbol: &str) -> SymbolRef {
         match self.find(symbol) {
             Some(pos) => pos,
             None => {
@@ -28,7 +29,7 @@ impl SymbolTable {
             .map(SymbolRef::new)
     }
 
-    pub fn resolve<'a>(&'a self, id: SymbolRef) -> Option<&'a str> {
+    pub fn get<'a>(&'a self, id: SymbolRef) -> Option<&'a str> {
         self.symbols.get(id.inner()).map(|s| s.as_str())
     }
 }
