@@ -2488,7 +2488,7 @@ impl Parsable for Spanned<MatchArm> {
         let _ = match cursor.parse::<Token![:]>() {
             Ok(pat) => Ok(pat),
             Err(err) => {
-                cursor.step_back();
+                seek!(cursor, Token::Delimeter(Delimeter::CloseBrace) | Token::Punctuation(Punctuation::Semicolon));
                 cursor.reporter().report_sync(err);
                 Err(())
             }
@@ -2581,7 +2581,7 @@ impl Parsable for Spanned<Pattern> {
                 if let Some(tok) = cursor.peek() {
                     match tok.inner() {
                         Token::Delimeter(Delimeter::OpenParen) => {
-                            // Step past opening parenthesis
+                            // step past opening parenthesis
                             cursor.step();
 
                             let components = match punctuated!(
@@ -2605,6 +2605,9 @@ impl Parsable for Spanned<Pattern> {
                             }, span.to(close.span())));
                         }
                         Token::Delimeter(Delimeter::OpenBrace) => {
+                            // step past opening brace
+                            cursor.step();
+
                             let fields = punctuated!(
                                 cursor,
                                 !Token::Delimeter(Delimeter::CloseBrace),
@@ -2616,7 +2619,7 @@ impl Parsable for Spanned<Pattern> {
                             return Ok(Spanned::new(Pattern::Struct {
                                 path,
                                 fields,
-                            }, span.to(close.span())))
+                            }, span.to(close.span()))) 
                         }
                         _ => {}
                     }
