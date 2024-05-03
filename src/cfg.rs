@@ -44,14 +44,30 @@ pub struct Project {
     pub ty: ProjectType,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
 pub enum Dependency {
     Simple(String),
     Detailed {
+        /// Dependency from git repo URL
+        #[serde(skip_serializing_if = "Option::is_none")]
         git: Option<String>,
+        /// Dependency from specific git branch
+        #[serde(skip_serializing_if = "Option::is_none")]
         branch: Option<String>,
+        /// Dependency from specific git tag
+        #[serde(skip_serializing_if = "Option::is_none")]
         tag: Option<String>,
+        ///Dependency from specific git commit
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rev: Option<String>,
+        /// Use this as the package name instead of the table key.
+        /// 
+        /// By using this, a package can have multiple versions of the same dependency.
+        #[serde(skip_serializing_if = "Option::is_none")]
         package: Option<String>,
+        /// Dependency from path
+        #[serde(skip_serializing_if = "Option::is_none")]
         path: Option<PathBuf>,
     },
 }
