@@ -3,6 +3,14 @@ use std::io::puts;
 use std::io::Display;
 use std::io::Writer;
 
+namespace foo {
+    static ANOTHER: str = "hello `foo`";
+
+    pub fn bar(): u8 {
+        return 42;
+    }
+}
+
 static COUNT: [u8; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 enum Option<T> {
@@ -10,10 +18,10 @@ enum Option<T> {
     None,
 
     pub fn is_some(*self): bool {
-        // match (*self) {
-        //     Option::Some: return true;
-        //     Option::None: return false;
-        // }
+        match (*self) {
+            Option::Some: return true;
+            Option::None: return false;
+        }
     }
 
     pub fn is_none(*self): bool {
@@ -21,10 +29,10 @@ enum Option<T> {
     }
 
     pub fn map<R>(self, op: fn(T): R): Option<R> {
-        // match (self) {
-        //     Some: return Some(op(param));
-        //     None: return None;
-        // }
+        match (self) {
+            Some: return Some(op(param));
+            None: return None;
+        }
     }
 }
 
@@ -32,13 +40,13 @@ fn main(): void {
     let string: str = "hello";
 
     let foobar: FooBar = FooBar::Baz(0, 132);
-    // let bytes: [u8; 5] = [0, 1, 2, 3, 4];
-    // match foobar {
-    //     Foo => puts("foo"),
-    //     Bar {foo, bar} => puts("bar"),
-    //     Baz<foo> => puts("baz"),
-    //     Qux<start, len> => puts("qux"),
-    // }
+    let bytes: [u8; 5] = [0, 1, 2, 3, 4];
+    match (foobar) {
+        Foo: puts("foo");
+        Bar {foo, bar}: puts("bar");
+        Baz(foo): puts("baz");
+        Qux(start, len): puts("qux");
+    }
 }
 
 pub fn sin_cos(n: u8): (u8, u8) {
