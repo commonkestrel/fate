@@ -7,59 +7,69 @@ use colored::{Color, ColoredString, Colorize};
 
 use std::sync::Arc;
 
+const BUG_MESSAGE: &str = "This is a bug. Please report it at `https://github.com/commonkestrel/fate/issues`";
+
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
-    message: String,
-    span: Option<Arc<Span>>,
     level: Level,
+    message: String,
+    note: Option<String>,
+    span: Option<Arc<Span>>,
+    
 }
 
 impl Diagnostic {
     pub fn error<S: Into<String>>(message: S) -> Self {
         Diagnostic {
-            message: message.into(),
-            span: None,
             level: Level::Error,
+            message: message.into(),
+            note: None,
+            span: None,
         }
     }
 
     pub fn spanned_error<M: Into<String>, S: Into<Arc<Span>>>(span: S, message: M) -> Self {
         Diagnostic {
-            message: message.into(),
-            span: Some(span.into()),
             level: Level::Error,
+            message: message.into(),
+            note: None,
+            span: Some(span.into()),
         }
     }
 
     pub fn warn<S: Into<String>>(message: S) -> Self {
         Diagnostic {
-            message: message.into(),
-            span: None,
             level: Level::Warn,
+            message: message.into(),
+            note: None,
+            span: None,
         }
     }
 
     pub fn spanned_warn<M: Into<String>, S: Into<Arc<Span>>>(span: S, message: M) -> Self {
         Diagnostic {
-            message: message.into(),
-            span: Some(span.into()),
             level: Level::Warn,
+            message: message.into(),
+            note: None,
+            span: Some(span.into()),
         }
     }
 
     pub fn debug<S: Into<String>>(message: S) -> Self {
         Diagnostic {
-            message: message.into(),
-            span: None,
             level: Level::Debug,
+            message: message.into(),
+            note: None,
+            span: None,
         }
     }
 
     pub fn spanned_debug<M: Into<String>, S: Into<Arc<Span>>>(span: S, message: M) -> Self {
         Diagnostic {
-            message: message.into(),
-            span: Some(span.into()),
             level: Level::Debug,
+            message: message.into(),
+            note: None,
+            span: Some(span.into()),
         }
     }
 
@@ -81,6 +91,30 @@ impl Diagnostic {
     pub fn with_message<S: Into<String>>(mut self, message: S) -> Self {
         self.set_message(message);
         self
+    }
+
+    pub fn set_note<S: Into<String>>(&mut self, note: S) {
+        self.note = Some(note.into());
+    }
+
+    #[inline]
+    pub fn with_note<S: Into<String>>(mut self, note: S) -> Self {
+        self.set_note(note);
+        self
+    }
+
+    pub fn clear_note(&mut self) {
+        self.note = None;
+    }
+
+    pub fn without_note(mut self) -> Self {
+        self.clear_note();
+        self
+    }
+
+    #[inline]
+    pub fn as_bug(self) -> Self {
+        self.with_note(BUG_MESSAGE)
     }
 
     fn format_message(&self) -> ColoredString {
@@ -121,15 +155,24 @@ impl Diagnostic {
     }
 
     async fn emit_fancy(self) {
+        let mut note_offset = self.level.title().len() + 1;
         let message = self.format_message();
         writeln!(async_std::io::stdout(), "{message}")
             .await
             .unwrap();
+
         if let Some(span) = self.span {
-            let pointer = span.pointer(self.level.color());
+            let (pointer, offset) = span.pointer(self.level.color());
+            note_offset = offset + 1;
             writeln!(async_std::io::stdout(), "{pointer}")
                 .await
                 .unwrap();
+        }
+
+        if let Some(note) = self.note {
+            writeln!(async_std::io::stdout(), "{:>note_offset$} {}: {note}", "=".bright_blue().bold(), "note".bold())
+                .await
+                .unwrap()
         }
     }
 }
@@ -140,14 +183,15 @@ impl PartialEq for Diagnostic {
     }
 }
 
-// Implemented for logos lexing errors
+// Implemented for `logos` lexing errors
 // Not for program use
 impl Default for Diagnostic {
     fn default() -> Self {
         Diagnostic {
-            message: String::new(),
-            span: None,
             level: Level::Error,
+            message: String::new(),
+            note: None,
+            span: None,
         }
     }
 }

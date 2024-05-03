@@ -137,7 +137,7 @@ impl Span {
         self.lookup.line_col(self.location.start)
     }
 
-    pub fn pointer(&self, arrow_color: Color) -> String {
+    pub fn pointer(&self, arrow_color: Color) -> (String, usize) {
         let lines = self.lookup.lines(self.location.clone());
         let line_n = lines.start + 1;
         let col_n = self.lookup.col_from_line(lines.start, self.location.start) + 1;
@@ -148,7 +148,7 @@ impl Span {
             let line = self.lookup.line(lines.start).trim_end();
             let offset = (lines.start + 1).ilog10() as usize + 2;
 
-            format!(
+            (format!(
                 "\
                 {arrow:>arr_space$} {name}:{line_n}:{col_n}\n\
                 {cap:>width$}\n\
@@ -168,7 +168,7 @@ impl Span {
                     length = self.location.end - self.location.start,
                 )
                 .color(arrow_color),
-            )
+            ), offset)
         }
     }
 }
