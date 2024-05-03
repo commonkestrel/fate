@@ -28,7 +28,7 @@ pub struct LexResult {
     pub stream: TokenStream,
     pub source: Arc<String>,
     pub lookup: Arc<Lookup>,
-    pub symbol_table: SymbolTable,
+    pub symbol_table: Arc<SymbolTable>,
 }
 
 pub async fn lex(source: String, content: File) -> Result<LexResult, Errors> {
@@ -70,7 +70,7 @@ pub async fn lex(source: String, content: File) -> Result<LexResult, Errors> {
             stream: tokens,
             source,
             lookup,
-            symbol_table: lex.extras,
+            symbol_table: Arc::new(lex.extras),
         })
     } else {
         Err(errors)

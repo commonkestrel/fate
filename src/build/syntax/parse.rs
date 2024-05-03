@@ -15,22 +15,22 @@ use super::{
     },
 };
 use crate::{
-    debug,
-    diagnostic::{Diagnostic, Reporter},
-    error,
-    span::{Lookup, Span, Spanned},
-    spanned_debug, spanned_error, warn, Token,
+    build::symbol_table::SymbolTable, debug, diagnostic::{Diagnostic, Reporter}, error, span::{Lookup, Span, Spanned}, spanned_debug, spanned_error, warn, Token
 };
 
 pub async fn parse(
     stream: TokenStream,
     home: PathBuf,
+    symbol_table: Arc<SymbolTable>,
     source_name: Arc<String>,
     lookup: Arc<Lookup>,
 ) -> Result<(Namespace, Reporter), Reporter> {
-    let reporter = Reporter::default();
-    let mut cursor = Cursor::new(&stream, source_name, lookup, reporter.clone());
-    let mut namespace = Namespace::empty(home);
+    let cursor = Cursor::new(&stream, source_name, lookup, Reporter::default());
+    parse_namespace(cursor, home, symbol_table).await
+}
+
+async fn parse_namespace<'a>(mut cursor: Cursor<'a>, home: PathBuf, symbol_table: Arc<SymbolTable>) -> Result<(Namespace, Reporter), Reporter> {
+    let mut namespace = Namespace::empty(home, symbol_table);
     let mut visibility = Visibility::Private;
 
     while let Some(tok) = cursor.peek() {
@@ -42,7 +42,7 @@ pub async fn parse(
                     ret
                 }
                 Err(err) => {
-                    reporter.report(err).await;
+                    cursor.reporter().report(err).await;
                     continue;
                 }
             }),
@@ -53,7 +53,7 @@ pub async fn parse(
                     ret
                 }
                 Err(err) => {
-                    reporter.report(err).await;
+                    cursor.reporter().report(err).await;
                     continue;
                 }
             }),
@@ -64,7 +64,7 @@ pub async fn parse(
                     ret
                 }
                 Err(err) => {
-                    reporter.report(err).await;
+                    cursor.reporter().report(err).await;
                     continue;
                 }
             }),
@@ -75,7 +75,7 @@ pub async fn parse(
                     ret
                 }
                 Err(err) => {
-                    reporter.report(err).await;
+                    cursor.reporter().report(err).await;
                     continue;
                 }
             }),
@@ -86,7 +86,7 @@ pub async fn parse(
                     ret
                 }
                 Err(err) => {
-                    reporter.report(err).await;
+                    cursor.reporter().report(err).await;
                     continue;
                 }
             }),
@@ -97,21 +97,21 @@ pub async fn parse(
                     ret
                 }
                 Err(err) => {
-                    reporter.report(err).await;
+                    cursor.reporter().report(err).await;
                     continue;
                 }
             }),
             Token::Keyword(Keyword::Namespace) => {
                 namespace
                     .submodules
-                    .push(match Submodule::parse(&mut cursor) {
+                    .push(match Box::pin(Submodule::parse(&mut cursor, &namespace.home, namespace.symbol_table.clone())).await {
                         Ok(submodule) => {
                             let ret = (submodule, visibility);
                             visibility = Visibility::Private;
                             ret
                         }
                         Err(err) => {
-                            reporter.report(err).await;
+                            cursor.reporter().report(err).await;
                             continue;
                         }
                     })
@@ -121,7 +121,7 @@ pub async fn parse(
                 visibility = Visibility::Public;
             }
             _ => {
-                reporter
+                cursor.reporter()
                     .report(spanned_error!(
                         tok.span().clone(),
                         "unexpected {} in top level section",
@@ -133,10 +133,10 @@ pub async fn parse(
         }
     }
 
-    if reporter.has_errors() {
-        Err(reporter)
+    if cursor.reporter().has_errors() {
+        Err(cursor.take_reporter())
     } else {
-        Ok((namespace, reporter))
+        Ok((namespace, cursor.take_reporter()))
     }
 }
 
@@ -630,6 +630,7 @@ macro_rules! punctuated {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Namespace {
     home: PathBuf,
+    symbol_table: Arc<SymbolTable>,
     imports: Vec<(Spanned<Use>, Visibility)>,
     submodules: Vec<(Submodule, Visibility)>,
     statics: Vec<(Spanned<Static>, Visibility)>,
@@ -640,9 +641,10 @@ pub struct Namespace {
 }
 
 impl Namespace {
-    fn empty(home: PathBuf) -> Self {
+    fn empty(home: PathBuf, symbol_table: Arc<SymbolTable>) -> Self {
         Namespace {
             home,
+            symbol_table,
             imports: Vec::new(),
             submodules: Vec::new(),
             statics: Vec::new(),
@@ -657,21 +659,53 @@ impl Namespace {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Submodule {
     ident: Spanned<Ident>,
-    content: Option<Spanned<Braced<Namespace>>>,
+    content: Option<Spanned<Namespace>>,
 }
 
 impl Submodule {
-    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+    async fn parse<'a>(cursor: &mut Cursor<'a>, parent: &Path, symbol_table: Arc<SymbolTable>) -> Result<Self, Diagnostic> {
         let _: Token![namespace] = cursor.parse()?;
         let ident: Spanned<Ident> = cursor.parse()?;
 
         let content = if cursor.check(&Token::Delimeter(Delimeter::OpenBrace)) {
             let open: Spanned<OpenBrace> = cursor.parse()?;
+            let start = cursor.position;
             let mut depth = 0;
 
-            todo!();
+            while !cursor.at_end() {
+                if cursor.check(&Token::Delimeter(Delimeter::OpenBrace)) {
+                    depth += 1;
+                } else if cursor.check(&Token::Delimeter(Delimeter::CloseBrace)) {
+                    if depth == 0 {
+                        let close: Spanned<Token!["}"]> = cursor.parse()?;
+                        let identifier = match symbol_table.get(ident.symbol) {
+                            Some(id) => id,
+                            None => {
+                                cursor.step();
+                                return Err(spanned_error!(ident.into_span(), "unresolvable identifier").as_bug());
+                            } 
+                        };
+
+                        let home = parent.join(identifier);
+
+                        let child_cursor = cursor.slice(start..(cursor.position-1));
+                        let content = match parse_namespace(child_cursor, home, symbol_table.clone()).await {
+                            Ok((content, _)) => content,
+                            Err(_) => return Err(error!("failed to parse namespace `{identifier}`")),
+                        };
+
+                        return Ok(Submodule {ident, content: Some(Spanned::new(content, open.span().to(close.span())))});
+                    }
+
+                    depth -= 1;
+                }
+                
+                cursor.step();
+            }
+
+            return Err(spanned_error!(open.into_span(), "unmatched opening brace"))
         } else {
-            let _: Token![;] = cursor.parse()?;
+            cursor.expect_semicolon();
             None
         };
 

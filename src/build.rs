@@ -1,6 +1,5 @@
 use crate::{
-    cfg::{Config, ConfigError, ProjectType},
-    error,
+    cfg::{Config, ConfigError, ProjectType}, debug, error
 };
 use async_std::fs::File;
 use clap::Args;
@@ -99,6 +98,7 @@ pub async fn build(args: BuildArgs) -> Result<(), BuildError> {
     let (namespace, mut reporter) = match parse::parse(
         root_stream.stream,
         home_path,
+        root_stream.symbol_table,
         root_stream.source,
         root_stream.lookup,
     )
