@@ -1,0 +1,11 @@
+pub struct Display {
+    __inner: void,
+
+    pub fn begin(): Display {
+        disable_console();
+    }
+}
+
+fn disable_console(): void {
+    
+}
