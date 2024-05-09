@@ -7,7 +7,7 @@ use std::{
 };
 
 use super::{
-    ast::{Enum, Expr, FnDefinition, Static, Struct, Union, Use, Visibility},
+    ast::{Enum, Expr, FnDefinition, Interface, Static, Struct, Union, Use, Visibility},
     lex::{self, Delimeter, Keyword, Punctuation, Token, TokenStream},
     token::{
         Break, CloseBrace, CloseBracket, CloseParen, Comma, Continue, DoubleColon, Eq, For, Gt,
@@ -82,6 +82,17 @@ async fn parse_namespace<'a>(mut cursor: Cursor<'a>, home: PathBuf, symbol_table
             Token::Keyword(Keyword::Enum) => namespace.enums.push(match cursor.parse() {
                 Ok(en) => {
                     let ret = (en, visibility);
+                    visibility = Visibility::Private;
+                    ret
+                }
+                Err(err) => {
+                    cursor.reporter().report(err).await;
+                    continue;
+                }
+            }),
+            Token::Keyword(Keyword::Interface) => namespace.interfaces.push(match cursor.parse() {
+                Ok(int) => {
+                    let ret = (int, visibility);
                     visibility = Visibility::Private;
                     ret
                 }
@@ -637,6 +648,7 @@ pub struct Namespace {
     structs: Vec<(Spanned<Struct>, Visibility)>,
     unions: Vec<(Spanned<Union>, Visibility)>,
     enums: Vec<(Spanned<Enum>, Visibility)>,
+    interfaces: Vec<(Interface, Visibility)>,
     functions: Vec<(Spanned<FnDefinition>, Visibility)>,
 }
 
@@ -651,6 +663,7 @@ impl Namespace {
             structs: Vec::new(),
             unions: Vec::new(),
             enums: Vec::new(),
+            interfaces: Vec::new(),
             functions: Vec::new(),
         }
     }

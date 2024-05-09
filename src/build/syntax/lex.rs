@@ -121,6 +121,7 @@ pub enum Token {
     #[token("continue", |_| Keyword::Continue)]
     #[token("let", |_| Keyword::Let)]
     #[token("namespace", |_| Keyword::Namespace)]
+    #[token("interface", |_| Keyword::Interface)]
     #[token("as", |_| Keyword::As)]
     #[token("self", |_| Keyword::LowerSelf)]
     #[token("Self", |_| Keyword::UpperSelf)]
@@ -328,6 +329,7 @@ pub enum Keyword {
     Continue,
     Let,
     Namespace,
+    Interface,
     As,
     LowerSelf,
     UpperSelf,
@@ -357,6 +359,7 @@ impl Keyword {
             Keyword::Continue => "keyword `continue`",
             Keyword::Let => "keyword `let`",
             Keyword::Namespace => "keyword `namespace`",
+            Keyword::Interface => "keyword `interface`",
             Keyword::As => "keyword `as`",
             Keyword::LowerSelf => "keyword `self`",
             Keyword::UpperSelf => "keyword `Self`",

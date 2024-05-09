@@ -52,6 +52,7 @@ macro_rules! Token {
     [continue] => {$crate::build::syntax::token::Continue};
     [let] => {$crate::build::syntax::token::Let};
     [namespace] => {$crate::build::syntax::token::Namespace};
+    [interface] => {$crate::build::syntax::token::Interface};
     [as] => {$crate::build::syntax::token::As};
     [self] => {$crate::build::syntax::token::LowerSelf};
     [Self] => {$crate::build::syntax::token::UpperSelf};
@@ -211,6 +212,7 @@ parsable! {
     "keyword `continue`" : Keyword(Keyword::Continue) => Continue,
     "keyword `let`" : Keyword(Keyword::Let) => Let,
     "keyword `namespace`" : Keyword(Keyword::Namespace) => Namespace,
+    "keyword `interface`" : Keyword(Keyword::Interface) => Interface,
     "keyword `as`" : Keyword(Keyword::As) => As,
     "keyword `self`" : Keyword(Keyword::LowerSelf) => LowerSelf,
     "keyword `Self`" : Keyword(Keyword::UpperSelf) => UpperSelf,

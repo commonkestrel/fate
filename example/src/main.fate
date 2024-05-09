@@ -13,6 +13,14 @@ namespace foo {
 
 static COUNT: [u8; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
+interface Foo {
+    fn bar(*self): void {
+        self.increment();
+    }
+
+    fn increment(*mut self): void;
+}
+
 enum Option<T> {
     Some(T),
     None,

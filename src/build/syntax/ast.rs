@@ -8,7 +8,7 @@ use crate::{
 };
 
 use super::{
-    lex::{self, Delimeter, Keyword, Punctuation, Token},
+    lex::{self, Delimeter, Keyword, Primitive, Punctuation, Token},
     parse::{Cursor, Parenthesized, Parsable, Punctuated},
     token::{
         CloseBrace, CloseBracket, CloseParen, Colon, Comma, DoubleColon, Eq, Ident, Mut, OpenBrace,
@@ -807,6 +807,7 @@ impl Parsable for VariantType {
 pub struct Static {
     pub vis: Visibility,
     pub ident: Spanned<Ident>,
+    pub mutability: Mutability,
     pub ty: Spanned<Type>,
     pub value: Spanned<Expr>,
 }
@@ -815,6 +816,7 @@ impl Parsable for Spanned<Static> {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         let open: Spanned<Token![static]> = cursor.parse()?;
         let vis = cursor.parse()?;
+        let mutability = cursor.parse()?;
         let ident = cursor.parse()?;
 
         match cursor.parse::<Token![:]>() {
@@ -846,6 +848,7 @@ impl Parsable for Spanned<Static> {
             Static {
                 vis,
                 ident,
+                mutability,
                 ty,
                 value,
             },
@@ -882,6 +885,7 @@ impl Parsable for Spanned<Use> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
+    Void,
     Immediate(i64),
     Boolean(bool),
     Str(AsciiStr),
@@ -897,7 +901,7 @@ pub enum Expr {
     Dot(Box<(Spanned<Expr>, Spanned<Ident>)>),
     BinaryOp(Box<BinOp>),
     UnaryOp(Spanned<UnaryOp>, Box<Spanned<Expr>>),
-    Cast(Spanned<Type>, Box<Spanned<Expr>>),
+    Cast(Box<Spanned<Expr>>, Spanned<Type>),
     Err,
 }
 
@@ -915,6 +919,7 @@ impl Parsable for Spanned<Expr> {
 impl Expr {
     pub fn contains_errors(&self) -> bool {
         match self {
+            Expr::Void => false,
             Expr::Immediate(_) => false,
             Expr::Boolean(_) => false,
             Expr::Reference(_) => false,
@@ -1081,6 +1086,22 @@ impl Expr {
                             b,
                         )),
                         expr_span,
+                    );
+                }
+                Token::Keyword(Keyword::As) => {
+                    cursor.step();
+                    let ty: Spanned<Type> = match cursor.parse() {
+                        Ok(ty) => ty,
+                        Err(err) => {
+                            cursor.reporter().report_sync(err);
+                            return Spanned::new(Expr::Err, tok.span().clone());
+                        }
+                    };
+
+                    let span = a.span().to(ty.span());
+                    a = Spanned::new(
+                        Expr::Cast(Box::new(a), ty),
+                        span,
                     );
                 }
                 _ => return a,
@@ -1476,6 +1497,7 @@ impl Expr {
             Token::Immediate(i) => Spanned::new(Expr::Immediate(i), span),
             Token::Boolean(b) => Spanned::new(Expr::Boolean(b), span),
             Token::String(str) => Spanned::new(Expr::Str(str), span),
+            Token::Primitive(Primitive::Void) => Spanned::new(Expr::Void, span),
             Token::Keyword(Keyword::LowerSelf) => Spanned::new(Expr::SelfVar, span),
             Token::Delimeter(Delimeter::OpenParen) => {
                 let a = Expr::parse_tuple(cursor);
@@ -1980,7 +2002,13 @@ impl Parsable for Spanned<Statement> {
                 Ok(Spanned::new(Statement::Continue, span))
             }
             Token::Keyword(Keyword::Return) => {
-                let value: Spanned<Expr> = cursor.parse()?;
+                // Allow for a simple `return;` instead of `return void;`
+                let value: Spanned<Expr> = if cursor.check(&Token::Punctuation(Punctuation::Semicolon)) {
+                    Spanned::new(Expr::Void, span.clone())
+                } else {
+                    cursor.parse()?
+                };
+
                 let return_span = span.to(value.span());
                 cursor.expect_semicolon();
 
@@ -2670,5 +2698,137 @@ impl Parsable for StructPat {
 
     fn description(&self) -> &'static str {
         "struct pattern"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Interface {
+    pub ident: Spanned<Ident>,
+    pub requirements: Punctuated<Path, Token![,]>,
+    pub functions: Vec<Spanned<ImplFn>>,
+}
+
+impl Parsable for Interface {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let _: Token![interface] = cursor.parse()?;
+
+        let ident: Spanned<Ident> = cursor.parse()?;
+
+        let requirements = if cursor.check(&Token::Punctuation(Punctuation::Colon)) {
+            cursor.step();
+
+            let requirements = match punctuated!(
+                cursor,
+                !Token::Punctuation(Punctuation::Gt),
+                Token::Punctuation(Punctuation::Plus)
+            ) {
+                Ok(requirements) => requirements,
+                Err(err) => {
+                    seek!(cursor, Token::Delimeter(Delimeter::OpenBrace));
+                    cursor.reporter().report_sync(err);
+                    Punctuated::empty()
+                }
+            };
+
+            requirements
+        } else {
+            Punctuated::empty()
+        };
+
+        let _: Token!["{"] = cursor.parse()?;
+
+        let mut functions = Vec::new();
+        while !cursor.at_end() {
+            if cursor.check(&Token::Delimeter(Delimeter::CloseBrace)) {
+                break;
+            }
+
+            functions.push(match cursor.parse() {
+                Ok(func) => func,
+                Err(err) => {
+                    cursor.seek(&Token::Delimeter(Delimeter::CloseBrace));
+                    cursor.step();
+                    return Err(err);
+                }
+            });
+        }
+
+        let _: Token!["}"] = cursor.parse()?;
+
+        Ok(Interface {
+            ident, requirements, functions,
+        })
+    }
+
+    fn description(&self) -> &'static str {
+        "interface"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImplFn {
+    pub ident: Spanned<Ident>,
+    pub generics: Vec<Spanned<Generic>>,
+    pub parameters: Parenthesized<Punctuated<Spanned<MethodParam>, Comma>>,
+    pub return_type: Spanned<Type>,
+    pub body: Option<Spanned<Statement>>,
+}
+
+impl Parsable for Spanned<ImplFn> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let open: Spanned<Token![fn]> = cursor.parse()?;
+        let ident: Spanned<Ident> = cursor.parse()?;
+
+        let generics = match parse_generics(cursor) {
+            Ok(generics) => generics,
+            Err(_) => {
+                seek!(
+                    cursor,
+                    Token::Punctuation(Punctuation::Semicolon)
+                        | Token::Keyword(Keyword::Impl)
+                        | Token::Delimeter(Delimeter::OpenBrace)
+                );
+                Vec::new()
+            }
+        };
+
+        let parameters: Parenthesized<Punctuated<Spanned<MethodParam>, Comma>> = cursor.parse()?;
+
+        let return_type = if cursor.check(&Token::Punctuation(Punctuation::Colon)) {
+            cursor.step();
+            cursor.parse()?
+        } else {
+            cursor
+                .reporter()
+                .report_sync(spanned_error!(ident.span().clone(), "missing return type"));
+
+            Spanned::new(Type::Err, ident.span().clone())
+        };
+
+        let (body, def_span) = if cursor.check(&Token::Delimeter(Delimeter::OpenBrace)) {
+            let body: Spanned<Statement> = cursor.parse()?;
+            let def_span = open.span().to(body.span());
+
+            (Some(body), def_span)
+        } else {
+            cursor.expect_semicolon();
+            
+            (None, open.span().to(return_type.span()))
+        };
+
+        Ok(Spanned::new(
+            ImplFn {
+                ident,
+                generics,
+                parameters,
+                return_type,
+                body,
+            },
+            def_span,
+        ))
+    }
+
+    fn description(&self) -> &'static str {
+        "interface function"
     }
 }
