@@ -41,7 +41,7 @@ impl Default for SymbolTable {
 }
 
 #[repr(transparent)]
-#[derive(Debug, PartialEq, Hash, Clone, Copy, PartialOrd)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct SymbolRef(usize);
 
 impl SymbolRef {

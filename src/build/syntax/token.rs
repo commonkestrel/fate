@@ -223,5 +223,25 @@ parsable! {
 parsable! {
     "integer" : Immediate(value) => Immediate { pub value: i64 },
     "string" : String(value) => StringLit { pub value: AsciiStr },
-    "identifier" : Ident(symbol) => Ident { pub symbol: SymbolRef },
+}
+
+// Declare this seperately in order to implement `Eq`, `Copy`, and `Hash` for `Ident`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Ident {
+    pub symbol: SymbolRef
+}
+
+impl Parsable for Spanned<Ident> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        let next = cursor.next().map(Spanned::deconstruct);
+        match next {
+            Some((Token::Ident(inner), span)) => Ok(Spanned::new(Ident { symbol: inner }, span)),
+            Some((tok, span)) => Err(spanned_error!(span, "expected identifier, found {}", tok.description())),
+            None => Err(spanned_error!(cursor.eof_span(), "expected identifier, found `EOF`"))
+        }
+    }
+
+    fn description(&self) -> &'static str {
+        "identifier"
+    }
 }
