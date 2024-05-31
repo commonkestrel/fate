@@ -1,14 +1,14 @@
-use std::ops::{Index, IndexMut};
+use std::{collections::HashMap, ops::{Index, IndexMut}};
 
 use indexmap::IndexMap;
 
-use crate::{build::syntax::{ast::{Mutability, Visibility}, lex::Primitive, token::Ident}, span::Spanned};
+use crate::{build::syntax::{ast::{Mutability, Visibility}, lex::Primitive, token::Ident}, diagnostic::Diagnostic, span::Spanned, spanned_error};
 
 use super::ast::typed;
 
 pub fn resolve() {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]   
 pub struct TypeId(usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -20,26 +20,19 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn new() -> Self {
+    pub fn empty() -> Self {
         Self {
-            types: vec![
-                Type::Primitive(Primitive::Void),
-                Type::Primitive(Primitive::Bool),
-                Type::Primitive(Primitive::Str),
-                Type::Primitive(Primitive::U8),
-                Type::Primitive(Primitive::U16),
-                Type::Primitive(Primitive::U24),
-                Type::Primitive(Primitive::U32),
-                Type::Primitive(Primitive::I8),
-                Type::Primitive(Primitive::I16),
-                Type::Primitive(Primitive::I24),
-            ],
+            types: Vec::new(),
             functions: Vec::new(),
         }
     }
 
+    pub fn populate(&mut self) {
+        todo!("populate with primatives and respective methods")
+    }
+
     pub fn reserve_ty(&mut self) -> TypeId {
-        self.types.push(Type::Empty);
+        self.types.push(Type::from(TypeInner::Empty));
         
         TypeId(self.types.len() - 1)
     }
@@ -58,6 +51,14 @@ impl Database {
         self.functions.push(func);
 
         FnId(self.functions.len() - 1)
+    }
+}
+
+impl Default for Database {
+    fn default() -> Self {
+        let mut s = Self::empty();
+        s.populate();
+        s
     }
 }
 
@@ -90,10 +91,35 @@ impl IndexMut<FnId> for Database {
 }
 
 pub struct Function {
-
+    
 }
 
-pub enum Type {
+pub struct Type {
+    inner: TypeInner,
+    methods: HashMap<Ident, FnId>,
+}
+
+impl Type {
+    pub fn add_method(&mut self, ident: Spanned<Ident>, func: FnId) -> Result<(), Diagnostic> {
+        let (ident, span) = ident.deconstruct();
+        if let Some(_) = self.methods.insert(ident, func) {
+            Err(spanned_error!(span, "found duplicate method"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl From<TypeInner> for Type {
+    fn from(value: TypeInner) -> Self {
+        Self {
+            inner: value,
+            methods: HashMap::new(),
+        }
+    }
+}
+
+pub enum TypeInner {
     Struct(Struct),
     Enum(Enum),
     Fn(FnSignature),
@@ -107,13 +133,11 @@ pub enum Type {
 pub struct Struct {
     ident: Spanned<Ident>,
     fields: IndexMap<Ident, TypeId>,
-    methods: IndexMap<Ident, TypeId>,
 }
 
 pub struct Enum {
     ident: Spanned<Ident>,
     varients: IndexMap<Ident, Varient>,
-    methods: IndexMap<Ident, TypeId>,
 }
 
 pub enum Varient {

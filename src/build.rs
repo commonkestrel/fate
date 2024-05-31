@@ -22,6 +22,7 @@ mod syntax {
 }
 mod frontend {
     pub mod type_resolution;
+    pub mod lib_resolution;
     pub mod ast {
         pub mod typed;
     }
